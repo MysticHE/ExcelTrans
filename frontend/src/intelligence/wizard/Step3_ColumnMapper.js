@@ -39,28 +39,28 @@ function ColumnChip({ col, role, onRoleChange }) {
 }
 
 function RoleSection({ roleKey, info, columns }) {
-  const { Icon, label, color, borderColor, iconColor, desc } = info;
+  const { Icon, label, color, iconColor, desc } = info;
   const badgeVariant = { blue: 'blue', green: 'green', purple: 'purple', gray: 'gray' }[color] || 'gray';
 
   return (
-    <div className={cn('bg-gray-50 rounded-xl p-3 border-l-4', borderColor)}>
-      <div className="flex items-center gap-2 mb-2">
-        <Icon className={cn('w-3.5 h-3.5', iconColor)} />
-        <h4 className="text-sm font-semibold text-gray-700">{label}</h4>
+    <div className="bg-gray-50 rounded-xl px-4 py-3 border border-gray-200 flex items-center gap-4">
+      {/* Left: label block, fixed width */}
+      <div className="flex items-center gap-2 shrink-0 w-44">
+        <Icon className={cn('w-3.5 h-3.5 shrink-0', iconColor)} />
+        <h4 className="text-sm font-semibold text-gray-700 whitespace-nowrap">{label}</h4>
         <span className="text-xs text-gray-400 hidden sm:inline">— {desc}</span>
-        <Badge variant={badgeVariant} className="ml-auto">{columns.length}</Badge>
       </div>
-      {columns.length === 0 ? (
-        <p className="text-xs text-gray-400 italic">No columns assigned</p>
-      ) : (
-        <div className="flex flex-wrap gap-1">
-          {columns.map(name => (
-            <span key={name} className="text-xs px-2 py-0.5 bg-white border border-gray-200 rounded-full text-gray-700">
-              {name}
-            </span>
-          ))}
-        </div>
-      )}
+      <Badge variant={badgeVariant} className="shrink-0">{columns.length}</Badge>
+      {/* Right: chips */}
+      <div className="flex flex-wrap gap-1 flex-1">
+        {columns.length === 0 ? (
+          <p className="text-xs text-gray-400 italic">No columns assigned</p>
+        ) : columns.map(name => (
+          <span key={name} className="text-xs px-2 py-0.5 bg-white border border-gray-200 rounded-full text-gray-700">
+            {name}
+          </span>
+        ))}
+      </div>
     </div>
   );
 }
@@ -124,7 +124,7 @@ export default function Step3_ColumnMapper({ wizard }) {
       </div>
 
       {/* Role summary */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="flex flex-col gap-2">
         {Object.entries(ROLE_LABELS).map(([key, info]) => (
           <RoleSection key={key} roleKey={key} info={info} columns={getColumnsByRole(key)} />
         ))}
