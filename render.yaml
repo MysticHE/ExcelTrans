@@ -1,0 +1,24 @@
+services:
+  # Python Flask backend
+  - type: web
+    name: exceltrans-backend
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: ANTHROPIC_API_KEY
+        sync: false   # Set this in Render dashboard (optional platform key)
+
+  # React frontend (static site)
+  - type: web
+    name: exceltrans-frontend
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: build
+    envVars:
+      - key: REACT_APP_API_URL
+        sync: false   # Set to your backend Render URL e.g. https://exceltrans-backend.onrender.com

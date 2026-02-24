@@ -1,6 +1,7 @@
 import React, { useCallback, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { Upload, FileSpreadsheet, CheckCircle2, ArrowRight, AlertCircle } from 'lucide-react';
+import { analyzeFiles } from '../services/intelApi';
 import { Button, Alert, cn } from '../ui';
 
 function FileDropzone({ label, file, onFile, description }) {
@@ -64,13 +65,8 @@ export default function Step1_Upload({ wizard }) {
     setLoading(true);
     setError(null);
 
-    const form = new FormData();
-    form.append('file_a', state.fileA);
-    if (state.fileB) form.append('file_b', state.fileB);
-
     try {
-      const res = await fetch('http://localhost:5000/api/intel/analyze', { method: 'POST', body: form });
-      const data = await res.json();
+      const data = await analyzeFiles(state.fileA, state.fileB);
       if (data.error) { setError(data.error); return; }
 
       update({
