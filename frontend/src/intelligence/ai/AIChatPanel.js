@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Bot, User, X, Send, Copy } from 'lucide-react';
+import { Bot, User, X, Send, Copy, KeyRound } from 'lucide-react';
 import { aiChat } from '../services/intelApi';
 import { cn } from '../ui';
 
@@ -97,6 +97,8 @@ export default function AIChatPanel({ open, onClose, context, aiConfig }) {
   const [loading, setLoading] = useState(false);
   const bottomRef = useRef(null);
 
+  const isConnected = aiConfig?.connectionType === 'paid_plan' || !!aiConfig?.apiKey;
+
   const send = async () => {
     if (!input.trim() || loading) return;
     const userMsg = { role: 'user', content: input };
@@ -149,11 +151,37 @@ export default function AIChatPanel({ open, onClose, context, aiConfig }) {
 
           {/* Messages */}
           <div className="flex-1 overflow-y-auto p-4 space-y-3">
-            {messages.map((msg, i) => (
-              <MessageBubble key={i} msg={msg} />
-            ))}
-            {loading && <TypingIndicator />}
-            <div ref={bottomRef} />
+            {isConnected ? (
+              <>
+                {messages.map((msg, i) => (
+                  <MessageBubble key={i} msg={msg} />
+                ))}
+                {loading && <TypingIndicator />}
+                <div ref={bottomRef} />
+              </>
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full gap-4 text-center px-4">
+                <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center">
+                  <KeyRound className="w-6 h-6 text-gray-400" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-gray-700">No AI model connected</p>
+                  <p className="text-xs text-gray-400 mt-1">
+                    To use AI Chat, connect an API key or select a paid plan in AI Settings.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2 justify-center">
+                  {['Claude Pro', 'ChatGPT Plus', 'Gemini Advanced'].map(plan => (
+                    <span
+                      key={plan}
+                      className="text-xs px-2.5 py-1 bg-indigo-50 text-indigo-600 rounded-full border border-indigo-200"
+                    >
+                      {plan}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Input */}
@@ -161,9 +189,13 @@ export default function AIChatPanel({ open, onClose, context, aiConfig }) {
             <div className="flex gap-2 items-end">
               <textarea
                 rows={1}
-                className="flex-1 text-sm border border-gray-200 rounded-xl px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                disabled={!isConnected}
+                className={cn(
+                  'flex-1 text-sm border border-gray-200 rounded-xl px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent',
+                  !isConnected && 'opacity-40 cursor-not-allowed bg-gray-50'
+                )}
                 style={{ maxHeight: '100px', overflowY: 'auto' }}
-                placeholder="Ask about comparison rules..."
+                placeholder={isConnected ? 'Ask about comparison rules...' : 'Connect AI in Settings to start chatting'}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => {
@@ -172,13 +204,15 @@ export default function AIChatPanel({ open, onClose, context, aiConfig }) {
               />
               <button
                 onClick={send}
-                disabled={!input.trim() || loading}
+                disabled={!input.trim() || loading || !isConnected}
                 className="p-2.5 bg-indigo-500 text-white rounded-xl hover:bg-indigo-600 disabled:opacity-50 transition-colors shrink-0"
               >
                 <Send className="w-4 h-4" />
               </button>
             </div>
-            <p className="text-xs text-gray-400 mt-1.5 text-center">Enter to send · Shift+Enter for new line</p>
+            <p className="text-xs text-gray-400 mt-1.5 text-center">
+              {isConnected ? 'Enter to send · Shift+Enter for new line' : 'Configure AI in Settings to enable chat'}
+            </p>
           </div>
         </motion.div>
       )}

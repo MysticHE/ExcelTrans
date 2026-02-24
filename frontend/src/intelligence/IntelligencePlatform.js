@@ -13,6 +13,14 @@ const PROVIDERS = {
   gemini: { label: 'Google Gemini', models: ['gemini-2.0-flash', 'gemini-2.5-pro-preview-03-25'] },
 };
 
+const PAID_PLAN_INFO = {
+  anthropic: 'Claude Pro / Team — claude.ai subscription',
+  openai: 'ChatGPT Plus / Team — chat.openai.com subscription',
+  gemini: 'Gemini Advanced — gemini.google.com subscription',
+};
+
+const isAIConnected = (cfg) => cfg?.connectionType === 'paid_plan' || !!cfg?.apiKey;
+
 function AISettingsPanel({ aiConfig, onSave, onClose }) {
   const [local, setLocal] = useState({ ...aiConfig });
   const [testing, setTesting] = useState(false);
@@ -26,13 +34,15 @@ function AISettingsPanel({ aiConfig, onSave, onClose }) {
     setTesting(false);
   };
 
+  const isPaidPlan = local.connectionType === 'paid_plan';
+
   return (
     <Modal onClose={onClose}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-auto">
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
           <div>
             <h2 className="font-semibold text-gray-900">AI Provider Settings</h2>
-            <p className="text-xs text-gray-500 mt-0.5">Configure your BYOK API key</p>
+            <p className="text-xs text-gray-500 mt-0.5">Configure your AI connection</p>
           </div>
           <button
             onClick={onClose}
@@ -43,6 +53,31 @@ function AISettingsPanel({ aiConfig, onSave, onClose }) {
         </div>
 
         <div className="p-6 space-y-5">
+          {/* Connection type toggle */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Connection Type</label>
+            <div className="flex gap-2 p-1 bg-gray-100 rounded-xl">
+              {[
+                { value: 'api_key', label: 'API Key' },
+                { value: 'paid_plan', label: 'Paid Plan' },
+              ].map(({ value, label }) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setLocal(p => ({ ...p, connectionType: value }))}
+                  className={cn(
+                    'flex-1 py-1.5 text-sm font-medium rounded-lg transition-all',
+                    local.connectionType === value
+                      ? 'bg-white text-indigo-700 shadow-sm'
+                      : 'text-gray-500 hover:text-gray-700'
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* Provider selector — card-based */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">Provider</label>
@@ -68,20 +103,35 @@ function AISettingsPanel({ aiConfig, onSave, onClose }) {
             </div>
           </div>
 
-          {/* API Key */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">API Key (BYOK)</label>
-            <Input
-              type="password"
-              placeholder={
-                local.provider === 'anthropic' ? 'sk-ant-...' :
-                local.provider === 'openai' ? 'sk-...' : 'AIza...'
-              }
-              value={local.apiKey || ''}
-              onChange={(e) => setLocal(p => ({ ...p, apiKey: e.target.value }))}
-            />
-            <p className="text-xs text-gray-400 mt-1">Stored in browser session only. Never sent to our servers.</p>
-          </div>
+          {/* API Key — shown only in api_key mode */}
+          {!isPaidPlan && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">API Key (BYOK)</label>
+              <Input
+                type="password"
+                placeholder={
+                  local.provider === 'anthropic' ? 'sk-ant-...' :
+                  local.provider === 'openai' ? 'sk-...' : 'AIza...'
+                }
+                value={local.apiKey || ''}
+                onChange={(e) => setLocal(p => ({ ...p, apiKey: e.target.value }))}
+              />
+              <p className="text-xs text-gray-400 mt-1">Stored in browser session only. Never sent to our servers.</p>
+            </div>
+          )}
+
+          {/* Paid plan info callout */}
+          {isPaidPlan && (
+            <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 space-y-1">
+              <p className="text-sm font-medium text-indigo-800">Platform uses your subscription access</p>
+              <p className="text-xs text-indigo-600">Select your provider and model. No API key required.</p>
+              {local.provider && PAID_PLAN_INFO[local.provider] && (
+                <p className="text-xs text-indigo-500 mt-1.5 pt-1.5 border-t border-indigo-200">
+                  {PAID_PLAN_INFO[local.provider]}
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Model selector */}
           {local.provider && PROVIDERS[local.provider] && (
@@ -99,30 +149,31 @@ function AISettingsPanel({ aiConfig, onSave, onClose }) {
             </div>
           )}
 
-          {/* Test connection */}
-          <div className="space-y-2">
-            <div className="flex items-center gap-3">
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={handleTest}
-                loading={testing}
-                disabled={!local.apiKey}
-              >
-                {testing ? 'Testing...' : 'Test Connection'}
-              </Button>
-              <span className="text-xs text-gray-400">Or leave empty to use platform key</span>
+          {/* Test connection — shown only in api_key mode */}
+          {!isPaidPlan && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-3">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleTest}
+                  loading={testing}
+                  disabled={!local.apiKey}
+                >
+                  {testing ? 'Testing...' : 'Test Connection'}
+                </Button>
+              </div>
+              {testResult && (
+                <Alert variant={testResult === 'success' ? 'success' : 'error'}>
+                  {testResult === 'success' ? (
+                    <><CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" /> Connected successfully</>
+                  ) : (
+                    <><AlertCircle className="w-4 h-4 shrink-0 mt-0.5" /> {testResult}</>
+                  )}
+                </Alert>
+              )}
             </div>
-            {testResult && (
-              <Alert variant={testResult === 'success' ? 'success' : 'error'}>
-                {testResult === 'success' ? (
-                  <><CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" /> Connected successfully</>
-                ) : (
-                  <><AlertCircle className="w-4 h-4 shrink-0 mt-0.5" /> {testResult}</>
-                )}
-              </Alert>
-            )}
-          </div>
+          )}
 
           {/* Actions */}
           <div className="flex gap-3 pt-1">
@@ -145,6 +196,7 @@ const DEFAULT_AI_CONFIG = {
   provider: 'anthropic',
   apiKey: sessionStorage.getItem('intel_ai_key') || '',
   model: 'claude-haiku-4-5-20251001',
+  connectionType: sessionStorage.getItem('intel_ai_conn') || 'api_key',
 };
 
 export default function IntelligencePlatform() {
@@ -158,6 +210,7 @@ export default function IntelligencePlatform() {
     setAIConfig(config);
     if (config.apiKey) sessionStorage.setItem('intel_ai_key', config.apiKey);
     else sessionStorage.removeItem('intel_ai_key');
+    sessionStorage.setItem('intel_ai_conn', config.connectionType || 'api_key');
   };
 
   const handleApplyTemplate = (tmpl) => {
@@ -232,14 +285,18 @@ export default function IntelligencePlatform() {
       </div>
 
       {/* AI status indicator */}
-      {aiConfig.apiKey && (
+      {isAIConnected(aiConfig) && (
         <div className="flex items-center gap-2 mb-4">
           <span className="relative flex h-2 w-2">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
             <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
           </span>
           <span className="text-xs text-gray-500">AI enabled</span>
-          <Badge variant="indigo">{aiConfig.provider} / {aiConfig.model}</Badge>
+          <Badge variant="indigo">
+            {aiConfig.connectionType === 'paid_plan'
+              ? `${aiConfig.provider} · Paid Plan`
+              : `${aiConfig.provider} / ${aiConfig.model}`}
+          </Badge>
         </div>
       )}
 
