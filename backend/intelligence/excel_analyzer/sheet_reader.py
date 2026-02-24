@@ -2,6 +2,8 @@
 Dual-pass openpyxl reader: reads formulas AND computed values from Excel sheets.
 """
 import openpyxl
+from openpyxl.cell.cell import MergedCell
+from openpyxl.utils import get_column_letter
 from typing import Any, Dict, List, Optional, Tuple
 
 
@@ -25,6 +27,20 @@ def read_sheet_dual_pass(filepath: str) -> Dict[str, Any]:
         for row_idx, row in enumerate(f_ws.iter_rows(), start=1):
             row_data = []
             for cell in row:
+                # MergedCell placeholders cover non-anchor positions of merged ranges.
+                # They have no value, formula, or column_letter — treat as empty.
+                if isinstance(cell, MergedCell):
+                    row_data.append({
+                        'row': row_idx,
+                        'col': cell.column,
+                        'col_letter': get_column_letter(cell.column),
+                        'formula': None,
+                        'value': None,
+                        'is_formula': False,
+                        'data_type': None,
+                    })
+                    continue
+
                 coord = cell.coordinate
                 formula_val = cell.value
                 is_formula = isinstance(formula_val, str) and formula_val.startswith('=')
@@ -32,7 +48,8 @@ def read_sheet_dual_pass(filepath: str) -> Dict[str, Any]:
                 # Get computed value from second pass
                 computed = None
                 if v_ws is not None:
-                    computed = v_ws[coord].value
+                    v_cell = v_ws[coord]
+                    computed = v_cell.value if not isinstance(v_cell, MergedCell) else None
 
                 row_data.append({
                     'row': row_idx,
