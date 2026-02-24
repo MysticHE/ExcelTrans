@@ -1,6 +1,6 @@
 """
 Generates Excel comparison reports using openpyxl.
-Follows the same PatternFill pattern as the main app.
+Supports multiple rule output columns, column filtering, and custom column order.
 """
 import io
 import openpyxl
@@ -41,9 +41,13 @@ def build_comparison_report(
     add_remarks: bool = True,
     include_summary: bool = True,
     highlight_changed_cells: bool = True,
+    output_sheet_name: str = 'Comparison',
+    included_columns: Optional[List[str]] = None,
+    column_order: Optional[List[str]] = None,
 ) -> bytes:
     """
     Build an Excel workbook from the rule executor result dict.
+    Supports multiple rule output columns, included_columns filter, and column_order.
 
     Returns raw bytes of the .xlsx file.
     """
@@ -51,29 +55,66 @@ def build_comparison_report(
 
     # ── Main comparison sheet ──────────────────────────────────────────────────
     ws = wb.active
-    ws.title = 'Comparison'[:31]
+    safe_name = (output_sheet_name or 'Comparison')[:31]
+    ws.title = safe_name
 
-    all_fields = list(dict.fromkeys(key_fields + display_fields + compare_fields))
-    headers = all_fields[:]
+    # Collect all data fields (key + display + compare)
+    all_data_fields = list(dict.fromkeys(key_fields + display_fields + compare_fields))
+
+    # Collect extra rule output column names from row data
+    extra_rule_cols: List[str] = []
+    seen_extra: set = set()
+    for row in result.get('rows', []):
+        for col_name in row.get('output_columns', {}):
+            if col_name == 'Remarks':
+                continue
+            if col_name not in seen_extra:
+                extra_rule_cols.append(col_name)
+                seen_extra.add(col_name)
+
+    # Build full header list: data fields + Remarks + extra rule columns
+    all_headers: List[str] = list(all_data_fields)
     if add_remarks:
-        headers.append('Remarks')
+        all_headers.append('Remarks')
+    for ec in extra_rule_cols:
+        all_headers.append(ec)
+
+    # Apply included_columns filter
+    if included_columns is not None:
+        included_set = set(included_columns)
+        all_headers = [h for h in all_headers if h in included_set]
+
+    # Apply column_order reordering
+    if column_order:
+        order_map = {col: i for i, col in enumerate(column_order)}
+        def _sort_key(h: str) -> int:
+            return order_map.get(h, len(column_order))
+        all_headers = sorted(all_headers, key=_sort_key)
 
     # Write headers
-    for col_idx, header in enumerate(headers, start=1):
+    for col_idx, header in enumerate(all_headers, start=1):
         cell = ws.cell(row=1, column=col_idx, value=header)
         cell.fill = _make_header_fill()
         cell.font = _make_header_font()
         cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
 
     # Write data rows
-    changed_cells = {}  # (row, col) → True for highlighting
     for row_idx, row_data in enumerate(result.get('rows', []), start=2):
         row_color = row_data.get('color')
         changed_fields = set(row_data.get('changed_fields', []))
         row_fill = _hex_to_fill(row_color)
+        output_cols_data = row_data.get('output_columns', {})
 
-        for col_idx, field in enumerate(all_fields, start=1):
-            cell = ws.cell(row=row_idx, column=col_idx, value=row_data.get(field))
+        for col_idx, field in enumerate(all_headers, start=1):
+            # Determine cell value based on field type
+            if field == 'Remarks':
+                value = output_cols_data.get('Remarks', {}).get('label', row_data.get('remarks', ''))
+            elif field in seen_extra:
+                value = output_cols_data.get(field, {}).get('label', '')
+            else:
+                value = row_data.get(field)
+
+            cell = ws.cell(row=row_idx, column=col_idx, value=value)
             cell.alignment = Alignment(vertical='center', wrap_text=False)
 
             # Row-level coloring
@@ -88,19 +129,8 @@ def build_comparison_report(
             if highlight_changed_cells and field in changed_fields and row_color is None:
                 cell.fill = PatternFill(start_color='FFEB9C', end_color='FFEB9C', fill_type='solid')
 
-        if add_remarks:
-            rem_col = len(all_fields) + 1
-            rem_cell = ws.cell(row=row_idx, column=rem_col, value=row_data.get('remarks', ''))
-            rem_cell.alignment = Alignment(vertical='center')
-            if row_fill:
-                rem_cell.fill = PatternFill(
-                    start_color=row_fill.start_color.rgb,
-                    end_color=row_fill.end_color.rgb,
-                    fill_type='solid'
-                )
-
     # Auto-fit column widths (capped at 40)
-    for col_idx in range(1, len(headers) + 1):
+    for col_idx in range(1, len(all_headers) + 1):
         col_letter = get_column_letter(col_idx)
         max_len = 10
         for row_idx in range(1, ws.max_row + 1):
@@ -129,7 +159,7 @@ def build_comparison_report(
 
         for i, (label, val) in enumerate(summary_rows, start=4):
             label_cell = ws_sum.cell(row=i, column=1, value=label)
-            val_cell = ws_sum.cell(row=i, column=2, value=val)
+            ws_sum.cell(row=i, column=2, value=val)
             label_cell.fill = _make_summary_title_fill()
             label_cell.font = Font(bold=True)
 

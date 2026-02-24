@@ -1,5 +1,6 @@
 """
 Orchestrates rule execution against two DataFrames to produce a comparison result.
+Supports multi-column output: each rule can target a named output column.
 """
 import pandas as pd
 from typing import Any, Dict, List, Optional, Tuple
@@ -24,7 +25,15 @@ def execute_template(template: ComparisonTemplate,
 
     Returns a result dict:
     {
-        'rows': [{...row data, 'remarks': '...', 'color': '#xxxxxx', 'changed_fields': [...]}],
+        'rows': [{
+            ...row data fields,
+            'source': 'B' | 'A' | 'matched',
+            'output_columns': {'Remarks': {'label': '...', 'color': '...'}, 'Custom Col': {...}},
+            'remarks': '...',        # first Remarks column label (backward compat)
+            'color': '#xxxxxx',      # row background from Remarks column
+            'changed_fields': [...],
+            '_row_a': {...},         # original row_a data for matched pairs (detail drawer)
+        }],
         'summary': {'total': int, 'additions': int, 'deletions': int, 'changes': int, 'unchanged': int},
     }
     """
@@ -50,127 +59,149 @@ def execute_template(template: ComparisonTemplate,
     else:
         matched_pairs, only_a, only_b = exact_match(rows_a, rows_b, key_fields)
 
-    # Pull PRESENCE_RULE config
-    presence_cfg = {}
-    for rule in template.rules:
-        if rule.rule_type == 'PRESENCE_RULE':
-            presence_cfg = rule.config
-            break
-
-    # Pull CHANGE_RULE configs
-    change_rules = [r for r in template.rules if r.rule_type == 'CHANGE_RULE']
-
-    # Pull CONDITION_RULEs
-    condition_rules = [r for r in template.rules if r.rule_type == 'CONDITION_RULE']
-
     result_rows = []
 
     # --- Process rows only in B (additions) ---
-    only_in_b_cfg = presence_cfg.get('only_in_file_b', {'outcome_label': 'Addition', 'color': '#C6EFCE'})
     for j in only_b:
         row_b = rows_b[j]
-        remarks = only_in_b_cfg.get('outcome_label', 'Addition')
-        color = only_in_b_cfg.get('color', '#C6EFCE')
-
-        # Check condition rules on additions
-        cond_label, cond_color = _apply_condition_rules(None, row_b, condition_rules)
-        if cond_label:
-            remarks = cond_label
-            color = cond_color
-
+        output_cols = _compute_output_columns('addition', None, row_b, template.rules, compare_fields)
+        if 'Remarks' not in output_cols:
+            output_cols['Remarks'] = {'label': 'Addition', 'color': '#C6EFCE'}
+        rem = output_cols.get('Remarks', {})
         result_rows.append({
             **_build_output_row(row_b, key_fields, compare_fields, display_fields),
             'source': 'B',
-            'remarks': remarks,
-            'color': color,
+            'output_columns': output_cols,
+            'remarks': rem.get('label', 'Addition'),
+            'color': rem.get('color', '#C6EFCE'),
             'changed_fields': [],
+            '_row_a': None,
         })
 
     # --- Process rows only in A (deletions) ---
-    only_in_a_cfg = presence_cfg.get('only_in_file_a', {'outcome_label': 'Deletion', 'color': '#FFC7CE'})
     for i in only_a:
         row_a = rows_a[i]
-        remarks = only_in_a_cfg.get('outcome_label', 'Deletion')
-        color = only_in_a_cfg.get('color', '#FFC7CE')
-
-        cond_label, cond_color = _apply_condition_rules(row_a, None, condition_rules)
-        if cond_label:
-            remarks = cond_label
-            color = cond_color
-
+        output_cols = _compute_output_columns('deletion', row_a, None, template.rules, compare_fields)
+        if 'Remarks' not in output_cols:
+            output_cols['Remarks'] = {'label': 'Deletion', 'color': '#FFC7CE'}
+        rem = output_cols.get('Remarks', {})
         result_rows.append({
             **_build_output_row(row_a, key_fields, compare_fields, display_fields),
             'source': 'A',
-            'remarks': resolve_outcome_label(remarks, row_a),
-            'color': color,
+            'output_columns': output_cols,
+            'remarks': rem.get('label', 'Deletion'),
+            'color': rem.get('color', '#FFC7CE'),
             'changed_fields': [],
+            '_row_a': None,
         })
 
     # --- Process matched pairs ---
     for i, j in matched_pairs:
         row_a = rows_a[i]
         row_b = rows_b[j]
-
-        # Check condition rules first (higher priority)
-        cond_label, cond_color = _apply_condition_rules(row_a, row_b, condition_rules)
-        if cond_label:
-            result_rows.append({
-                **_build_output_row(row_b, key_fields, compare_fields, display_fields),
-                'source': 'matched',
-                'remarks': resolve_outcome_label(cond_label, row_b),
-                'color': cond_color,
-                'changed_fields': fields_changed(row_a, row_b, compare_fields),
-            })
-            continue
-
-        # Check CHANGE_RULEs
-        for change_rule in change_rules:
-            cfg = change_rule.config
-            check_fields = cfg.get('fields', compare_fields)
-            changed = fields_changed(row_a, row_b, check_fields)
-            if changed:
-                result_rows.append({
-                    **_build_output_row(row_b, key_fields, compare_fields, display_fields),
-                    'source': 'matched',
-                    'remarks': cfg.get('outcome_label', 'Changed'),
-                    'color': cfg.get('color', '#FFEB9C'),
-                    'changed_fields': changed,
-                })
-                break
-        else:
-            # Check general field changes
-            changed = fields_changed(row_a, row_b, compare_fields)
-            if changed:
-                result_rows.append({
-                    **_build_output_row(row_b, key_fields, compare_fields, display_fields),
-                    'source': 'matched',
-                    'remarks': 'Changed',
-                    'color': '#FFEB9C',
-                    'changed_fields': changed,
-                })
+        all_changed = fields_changed(row_a, row_b, compare_fields)
+        output_cols = _compute_output_columns(
+            'matched', row_a, row_b, template.rules, compare_fields,
+            all_changed_fields=all_changed
+        )
+        if 'Remarks' not in output_cols:
+            if all_changed:
+                output_cols['Remarks'] = {'label': 'Changed', 'color': '#FFEB9C'}
             else:
-                result_rows.append({
-                    **_build_output_row(row_b, key_fields, compare_fields, display_fields),
-                    'source': 'matched',
-                    'remarks': '',
-                    'color': None,
-                    'changed_fields': [],
-                })
+                output_cols['Remarks'] = {'label': '', 'color': None}
+        rem = output_cols.get('Remarks', {})
+        all_data_fields = list(dict.fromkeys(key_fields + display_fields + compare_fields))
+        result_rows.append({
+            **_build_output_row(row_b, key_fields, compare_fields, display_fields),
+            'source': 'matched',
+            'output_columns': output_cols,
+            'remarks': rem.get('label', ''),
+            'color': rem.get('color', None),
+            'changed_fields': all_changed,
+            '_row_a': {f: row_a.get(f) for f in all_data_fields},
+        })
 
     summary = _build_summary(result_rows)
     return {'rows': result_rows, 'summary': summary}
 
 
-def _apply_condition_rules(row_a, row_b, condition_rules):
-    """Apply condition rules and return (label, color) or (None, None)."""
-    for rule in condition_rules:
-        cfg = rule.config
+def _compute_output_columns(context: str,
+                             row_a: Optional[Dict],
+                             row_b: Optional[Dict],
+                             rules: list,
+                             compare_fields: List[str],
+                             all_changed_fields: Optional[List[str]] = None) -> Dict:
+    """
+    Evaluate all rules for a row and return output_columns dict.
+
+    context: 'addition' | 'deletion' | 'matched'
+    Returns: {col_name: {'label': str, 'color': str}, ...}
+    Priority: first matching rule per output column wins.
+    """
+    output_columns: Dict[str, Dict] = {}
+
+    for rule in rules:
+        if rule.rule_type in ('ROW_MATCH', 'FORMULA_RULE'):
+            continue
+
+        col_name = rule.output_column or 'Remarks'
+        if col_name in output_columns:
+            continue  # First match wins for this output column
+
+        label, color = _evaluate_rule(rule, row_a, row_b, context, compare_fields, all_changed_fields)
+        if label is not None:
+            output_columns[col_name] = {'label': label, 'color': color}
+
+    return output_columns
+
+
+def _evaluate_rule(rule,
+                   row_a: Optional[Dict],
+                   row_b: Optional[Dict],
+                   context: str,
+                   compare_fields: List[str],
+                   all_changed_fields: Optional[List[str]] = None) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Evaluate a single rule against a row context.
+    Returns (label, color) if the rule fires, or (None, None) if it doesn't apply.
+    """
+    rt = rule.rule_type
+    cfg = rule.config
+
+    if rt == 'PRESENCE_RULE':
+        if context == 'addition':
+            entry = cfg.get('only_in_file_b', {})
+            label = entry.get('outcome_label', 'Addition')
+            color = entry.get('color', '#C6EFCE')
+            return resolve_outcome_label(label, row_b) if row_b else label, color
+        elif context == 'deletion':
+            entry = cfg.get('only_in_file_a', {})
+            label = entry.get('outcome_label', 'Deletion')
+            color = entry.get('color', '#FFC7CE')
+            return resolve_outcome_label(label, row_a) if row_a else label, color
+        return None, None
+
+    elif rt == 'CHANGE_RULE':
+        if context != 'matched':
+            return None, None
+        check_fields = cfg.get('fields', compare_fields) or compare_fields
+        if all_changed_fields is not None:
+            changed = [f for f in check_fields if f in set(all_changed_fields)]
+        else:
+            changed = fields_changed(row_a, row_b, check_fields) if row_a and row_b else []
+        if changed:
+            return cfg.get('outcome_label', 'Changed'), cfg.get('color', '#FFEB9C')
+        return None, None
+
+    elif rt == 'CONDITION_RULE':
         conditions = cfg.get('conditions', [])
         join = cfg.get('condition_join', 'AND')
         if evaluate_conditions(row_a, row_b, conditions, join):
-            label = cfg.get('outcome_label', 'Flagged')
-            color = cfg.get('color', '#FFC7CE')
-            return label, color
+            active_row = row_b if row_b is not None else row_a
+            label = resolve_outcome_label(cfg.get('outcome_label', 'Flagged'), active_row)
+            return label, cfg.get('color', '#FFC7CE')
+        return None, None
+
     return None, None
 
 

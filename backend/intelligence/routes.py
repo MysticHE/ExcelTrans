@@ -226,10 +226,14 @@ def analyze():
     if not file_results:
         return jsonify({'error': 'No valid files provided'}), 400
 
+    # Collect original filenames for template variable resolution
+    original_names = {key: request.files[key].filename for key in ['file_a', 'file_b'] if request.files.get(key)}
+
     # Store in session
     _set_session(session_id, {
         'file_analysis': file_results,
         'temp_paths': temp_paths,
+        'original_names': original_names,
         'template': None,
         'result': None,
     })
@@ -300,8 +304,8 @@ def process():
         return jsonify({'error': f'Processing failed: {str(e)}'}), 500
 
     if dry_run:
-        # Return first 20 rows for preview
-        preview = result['rows'][:20]
+        # Return first 50 rows for preview (includes _row_a for detail drawer)
+        preview = result['rows'][:50]
         return jsonify({'preview': preview, 'summary': result['summary']})
 
     # Build Excel report
@@ -315,6 +319,9 @@ def process():
             add_remarks=template.output_config.add_remarks_column,
             include_summary=template.output_config.include_summary_sheet,
             highlight_changed_cells=template.output_config.highlight_changed_cells,
+            output_sheet_name=template.output_config.output_sheet_name,
+            included_columns=template.output_config.included_columns,
+            column_order=template.output_config.column_order,
         )
     except Exception as e:
         logger.error(f"Report generation failed: {e}")
@@ -325,9 +332,16 @@ def process():
     session['result'] = {'id': result_id, 'bytes': report_bytes, 'summary': result['summary']}
     _set_session(session_id, session)
 
+    # Resolve filename template variables: {date}, {file_a}, {file_b}
     date_str = datetime.now().strftime('%Y%m%d')
-    filename_template = template.output_config.output_filename_template
-    filename = filename_template.replace('{date}', date_str) + '.xlsx'
+    original_names = session.get('original_names', {})
+    file_a_stem = os.path.splitext(original_names.get('file_a', 'file_a'))[0]
+    file_b_stem = os.path.splitext(original_names.get('file_b', 'file_b'))[0]
+    filename_template = template.output_config.output_filename_template or 'comparison_{date}'
+    filename = (filename_template
+                .replace('{date}', date_str)
+                .replace('{file_a}', file_a_stem)
+                .replace('{file_b}', file_b_stem)) + '.xlsx'
 
     return jsonify({
         'download_id': result_id,

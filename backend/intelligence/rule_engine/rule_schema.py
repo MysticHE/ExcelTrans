@@ -116,13 +116,22 @@ class FormulaRuleConfig:
 class Rule:
     rule_type: str
     config: Dict
+    output_column: str = ''  # '' = shared Remarks column; custom name = separate column
 
     def to_dict(self):
-        return {'rule_type': self.rule_type, 'config': self.config}
+        return {
+            'rule_type': self.rule_type,
+            'config': self.config,
+            'output_column': self.output_column,
+        }
 
     @classmethod
     def from_dict(cls, d: Dict) -> 'Rule':
-        return cls(rule_type=d['rule_type'], config=d.get('config', {}))
+        return cls(
+            rule_type=d['rule_type'],
+            config=d.get('config', {}),
+            output_column=d.get('output_column', ''),
+        )
 
 
 @dataclass
@@ -159,6 +168,9 @@ class OutputConfig:
     include_summary_sheet: bool = True
     highlight_changed_cells: bool = True
     output_filename_template: str = 'comparison_{date}'
+    output_sheet_name: str = 'Comparison'
+    included_columns: Optional[List[str]] = None  # None = all columns
+    column_order: Optional[List[str]] = None       # None = default order
 
     def to_dict(self):
         return {
@@ -166,6 +178,9 @@ class OutputConfig:
             'include_summary_sheet': self.include_summary_sheet,
             'highlight_changed_cells': self.highlight_changed_cells,
             'output_filename_template': self.output_filename_template,
+            'output_sheet_name': self.output_sheet_name,
+            'included_columns': self.included_columns,
+            'column_order': self.column_order,
         }
 
 
@@ -211,5 +226,8 @@ class ComparisonTemplate:
                 include_summary_sheet=oc.get('include_summary_sheet', True),
                 highlight_changed_cells=oc.get('highlight_changed_cells', True),
                 output_filename_template=oc.get('output_filename_template', 'comparison_{date}'),
+                output_sheet_name=oc.get('output_sheet_name', 'Comparison'),
+                included_columns=oc.get('included_columns'),
+                column_order=oc.get('column_order'),
             ),
         )
