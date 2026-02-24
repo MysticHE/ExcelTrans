@@ -15,13 +15,25 @@ function getAIHeaders(aiConfig) {
   };
 }
 
+async function parseResponse(res) {
+  const contentType = res.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
+    throw new Error(`Server error (${res.status}): unexpected response format`);
+  }
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || `Request failed (${res.status})`);
+  }
+  return data;
+}
+
 export async function analyzeFiles(fileA, fileB) {
   const form = new FormData();
   form.append('file_a', fileA);
   if (fileB) form.append('file_b', fileB);
 
   const res = await fetch(`${BASE}/api/intel/analyze`, { method: 'POST', body: form });
-  return res.json();
+  return parseResponse(res);
 }
 
 export async function processComparison(sessionId, template, dryRun = false) {
@@ -30,7 +42,7 @@ export async function processComparison(sessionId, template, dryRun = false) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ session_id: sessionId, template, dry_run: dryRun }),
   });
-  return res.json();
+  return parseResponse(res);
 }
 
 export async function downloadResult(sessionId, resultId, filename) {
@@ -48,12 +60,12 @@ export async function downloadResult(sessionId, resultId, filename) {
 
 export async function listTemplates() {
   const res = await fetch(`${BASE}/api/intel/templates`);
-  return res.json();
+  return parseResponse(res);
 }
 
 export async function getTemplate(slug) {
   const res = await fetch(`${BASE}/api/intel/templates/${slug}`);
-  return res.json();
+  return parseResponse(res);
 }
 
 export async function saveTemplate(template) {
@@ -62,7 +74,7 @@ export async function saveTemplate(template) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(template),
   });
-  return res.json();
+  return parseResponse(res);
 }
 
 export async function aiSuggestTemplate(columns, sheetName, aiConfig) {
@@ -71,7 +83,7 @@ export async function aiSuggestTemplate(columns, sheetName, aiConfig) {
     headers: { 'Content-Type': 'application/json', ...getAIHeaders(aiConfig) },
     body: JSON.stringify({ columns, sheet_name: sheetName }),
   });
-  return res.json();
+  return parseResponse(res);
 }
 
 export async function aiNlToRule(description, columns, aiConfig) {
@@ -80,7 +92,7 @@ export async function aiNlToRule(description, columns, aiConfig) {
     headers: { 'Content-Type': 'application/json', ...getAIHeaders(aiConfig) },
     body: JSON.stringify({ description, columns }),
   });
-  return res.json();
+  return parseResponse(res);
 }
 
 export async function aiChat(message, context, aiConfig) {
@@ -89,7 +101,7 @@ export async function aiChat(message, context, aiConfig) {
     headers: { 'Content-Type': 'application/json', ...getAIHeaders(aiConfig) },
     body: JSON.stringify({ message, context }),
   });
-  return res.json();
+  return parseResponse(res);
 }
 
 export async function testAIKey(aiConfig) {
@@ -98,10 +110,10 @@ export async function testAIKey(aiConfig) {
     headers: { 'Content-Type': 'application/json', ...getAIHeaders(aiConfig) },
     body: JSON.stringify({}),
   });
-  return res.json();
+  return parseResponse(res);
 }
 
 export async function listProviders() {
   const res = await fetch(`${BASE}/api/intel/providers`);
-  return res.json();
+  return parseResponse(res);
 }

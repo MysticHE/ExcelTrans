@@ -55,9 +55,9 @@ def execute_template(template: ComparisonTemplate,
 
     # Match rows
     if match_method == 'fuzzy':
-        matched_pairs, only_a, only_b = fuzzy_match(rows_a, rows_b, key_fields, fuzzy_threshold)
+        matched_pairs, only_a, only_b, match_warnings = fuzzy_match(rows_a, rows_b, key_fields, fuzzy_threshold)
     else:
-        matched_pairs, only_a, only_b = exact_match(rows_a, rows_b, key_fields)
+        matched_pairs, only_a, only_b, match_warnings = exact_match(rows_a, rows_b, key_fields)
 
     result_rows = []
 
@@ -122,7 +122,10 @@ def execute_template(template: ComparisonTemplate,
         })
 
     summary = _build_summary(result_rows)
-    return {'rows': result_rows, 'summary': summary}
+    result: Dict[str, Any] = {'rows': result_rows, 'summary': summary}
+    if match_warnings:
+        result['warnings'] = match_warnings
+    return result
 
 
 def _compute_output_columns(context: str,

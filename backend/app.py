@@ -5,6 +5,7 @@ from extensions import limiter
 from intelligence import intel_bp
 
 app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50 MB upload limit
 
 ALLOWED_ORIGINS = [
     'https://exceltrans-frontend.onrender.com',

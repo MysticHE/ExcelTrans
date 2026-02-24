@@ -6,6 +6,7 @@ import io
 import json
 import logging
 import os
+import tempfile
 import threading
 import time
 import uuid
@@ -43,7 +44,7 @@ SESSION_TTL_SECONDS = 3600  # 1 hour
 
 
 def _cleanup_sessions():
-    """Background thread: remove expired sessions."""
+    """Background thread: remove expired sessions and their temp files."""
     while True:
         time.sleep(300)
         now = time.time()
@@ -51,7 +52,13 @@ def _cleanup_sessions():
             expired = [sid for sid, s in _sessions.items()
                        if now - s.get('created_at', 0) > SESSION_TTL_SECONDS]
             for sid in expired:
-                _sessions.pop(sid, None)
+                session = _sessions.pop(sid, None)
+                if session:
+                    for path in session.get('temp_paths', {}).values():
+                        try:
+                            os.unlink(path)
+                        except OSError:
+                            pass
         if expired:
             logger.info(f"Cleaned up {len(expired)} expired intel sessions")
 
@@ -71,7 +78,6 @@ def _set_session(session_id: str, data: Dict):
 
 # ── Template registry ─────────────────────────────────────────────────────────
 _TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), 'built_in_templates')
-_user_templates: Dict[str, Dict] = {}  # session-scoped user templates
 
 
 def _load_builtin_templates() -> Dict[str, Dict]:
@@ -210,7 +216,6 @@ def analyze():
             return jsonify({'error': f'{key}: Only .xlsx and .xls files supported'}), 400
 
         # Save to temp
-        import tempfile
         suffix = '.xlsx' if f.filename.lower().endswith('.xlsx') else '.xls'
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
         f.save(tmp.name)
@@ -306,7 +311,10 @@ def process():
     if dry_run:
         # Return first 50 rows for preview (includes _row_a for detail drawer)
         preview = result['rows'][:50]
-        return jsonify({'preview': preview, 'summary': result['summary']})
+        response = {'preview': preview, 'summary': result['summary']}
+        if result.get('warnings'):
+            response['warnings'] = result['warnings']
+        return jsonify(response)
 
     # Build Excel report
     try:
@@ -343,12 +351,15 @@ def process():
                 .replace('{file_a}', file_a_stem)
                 .replace('{file_b}', file_b_stem)) + '.xlsx'
 
-    return jsonify({
+    response = {
         'download_id': result_id,
         'download_url': f'/api/intel/download/{session_id}/{result_id}',
         'filename': filename,
         'summary': result['summary'],
-    })
+    }
+    if result.get('warnings'):
+        response['warnings'] = result['warnings']
+    return jsonify(response)
 
 
 @intel_bp.route('/download/<session_id>/<result_id>', methods=['GET'])
@@ -393,8 +404,14 @@ def get_template(slug):
     """Get a specific template by slug."""
     if slug in _builtin_templates:
         return jsonify(_builtin_templates[slug])
-    if slug in _user_templates:
-        return jsonify(_user_templates[slug])
+    # Check session-scoped user templates
+    session_id = request.args.get('session_id')
+    if session_id:
+        session = _get_session(session_id)
+        if session:
+            user_templates = session.get('user_templates', {})
+            if slug in user_templates:
+                return jsonify(user_templates[slug])
     return jsonify({'error': f"Template '{slug}' not found"}), 404
 
 
@@ -409,8 +426,19 @@ def save_template():
     if not is_valid:
         return jsonify({'error': 'Invalid template', 'details': errors}), 400
 
+    session_id = body.get('session_id')
     slug = body.get('slug') or body.get('template_name', '').lower().replace(' ', '_')
-    _user_templates[slug] = body
+
+    if session_id:
+        session = _get_session(session_id)
+        if not session:
+            return jsonify({'error': 'Session not found'}), 404
+        user_templates = session.get('user_templates', {})
+        user_templates[slug] = body
+        session['user_templates'] = user_templates
+        _set_session(session_id, session)
+    # If no session_id, template is accepted but not persisted (stateless call)
+
     return jsonify({'slug': slug, 'message': 'Template saved'})
 
 

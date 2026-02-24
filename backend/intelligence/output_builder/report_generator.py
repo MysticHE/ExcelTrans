@@ -91,6 +91,9 @@ def build_comparison_report(
             return order_map.get(h, len(column_order))
         all_headers = sorted(all_headers, key=_sort_key)
 
+    # Track max column widths during write (avoids a second O(rows×cols) pass)
+    col_widths = [max(10, len(h)) for h in all_headers]
+
     # Write headers
     for col_idx, header in enumerate(all_headers, start=1):
         cell = ws.cell(row=1, column=col_idx, value=header)
@@ -98,7 +101,7 @@ def build_comparison_report(
         cell.font = _make_header_font()
         cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
 
-    # Write data rows
+    # Write data rows — track column widths inline
     for row_idx, row_data in enumerate(result.get('rows', []), start=2):
         row_color = row_data.get('color')
         changed_fields = set(row_data.get('changed_fields', []))
@@ -117,6 +120,10 @@ def build_comparison_report(
             cell = ws.cell(row=row_idx, column=col_idx, value=value)
             cell.alignment = Alignment(vertical='center', wrap_text=False)
 
+            # Track column width
+            if value is not None:
+                col_widths[col_idx - 1] = min(40, max(col_widths[col_idx - 1], len(str(value))))
+
             # Row-level coloring
             if row_fill:
                 cell.fill = PatternFill(
@@ -129,15 +136,9 @@ def build_comparison_report(
             if highlight_changed_cells and field in changed_fields and row_color is None:
                 cell.fill = PatternFill(start_color='FFEB9C', end_color='FFEB9C', fill_type='solid')
 
-    # Auto-fit column widths (capped at 40)
-    for col_idx in range(1, len(all_headers) + 1):
-        col_letter = get_column_letter(col_idx)
-        max_len = 10
-        for row_idx in range(1, ws.max_row + 1):
-            cell_val = ws.cell(row=row_idx, column=col_idx).value
-            if cell_val:
-                max_len = max(max_len, min(len(str(cell_val)), 40))
-        ws.column_dimensions[col_letter].width = max_len + 2
+    # Apply collected column widths
+    for col_idx, width in enumerate(col_widths, start=1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = width + 2
 
     ws.freeze_panes = 'A2'
 
