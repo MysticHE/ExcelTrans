@@ -97,7 +97,7 @@ export default function AIChatPanel({ open, onClose, context, aiConfig }) {
   const [loading, setLoading] = useState(false);
   const bottomRef = useRef(null);
 
-  const isConnected = aiConfig?.connectionType === 'paid_plan' || !!aiConfig?.apiKey;
+  const isConnected = !!aiConfig?.apiKey;
 
   const send = async () => {
     if (!input.trim() || loading) return;
