@@ -118,7 +118,3 @@ export async function listProviders() {
   return parseResponse(res);
 }
 
-export async function getAIStatus() {
-  const res = await fetch(`${BASE}/api/intel/ai/status`);
-  return parseResponse(res);
-}

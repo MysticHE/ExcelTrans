@@ -102,19 +102,13 @@ _builtin_templates = _load_builtin_templates()
 
 # ── Helper: AI provider from request headers ──────────────────────────────────
 def _get_ai_provider_from_request():
-    """Extract AI provider from request headers. Falls back to platform key."""
+    """Extract AI provider from request headers (BYOK only)."""
     provider_name = request.headers.get('X-AI-Provider', 'anthropic').lower()
     api_key = request.headers.get('X-AI-Key', '')
     model = request.headers.get('X-AI-Model', '')
 
-    # Fall back to platform key if no BYOK
     if not api_key:
-        platform_key = os.environ.get('ANTHROPIC_API_KEY', '')
-        if not platform_key:
-            return None, "No AI API key provided. Please configure an API key in AI Settings."
-        api_key = platform_key
-        provider_name = 'anthropic'
-        model = model or 'claude-haiku-4-5-20251001'
+        return None, "No AI API key provided. Please configure an API key in AI Settings."
 
     try:
         provider = AIProviderFactory.get_provider(provider_name, api_key, model or None)
@@ -536,18 +530,6 @@ def ai_test():
         return jsonify({'success': ok})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 400
-
-
-@intel_bp.route('/ai/status', methods=['GET'])
-def ai_status():
-    """Return whether AI is available and via which source (platform key or BYOK)."""
-    has_platform_key = bool(os.environ.get('ANTHROPIC_API_KEY', ''))
-    return jsonify({
-        'available': has_platform_key,
-        'source': 'platform' if has_platform_key else None,
-        'provider': 'anthropic' if has_platform_key else None,
-        'model': 'claude-haiku-4-5-20251001' if has_platform_key else None,
-    })
 
 
 @intel_bp.route('/providers', methods=['GET'])

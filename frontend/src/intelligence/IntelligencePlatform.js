@@ -1,10 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { LayoutTemplate, MessageSquare, Settings, RotateCcw, CheckCircle2, AlertCircle, Zap, Trash2 } from 'lucide-react';
 import WizardContainer from './wizard/WizardContainer';
 import AIChatPanel from './ai/AIChatPanel';
 import TemplateGallery from './templates/TemplateGallery';
 import { useWizardState } from './hooks/useWizardState';
-import { testAIKey, getAIStatus } from './services/intelApi';
+import { testAIKey } from './services/intelApi';
 import { Button, Input, Modal, Alert, Badge, Tooltip, cn } from './ui';
 
 const PROVIDERS = {
@@ -153,7 +153,6 @@ const DEFAULT_AI_CONFIG = {
   provider: 'anthropic',
   apiKey: sessionStorage.getItem('intel_ai_key') || '',
   model: 'claude-haiku-4-5-20251001',
-  source: sessionStorage.getItem('intel_ai_key') ? 'byok' : null,
 };
 
 export default function IntelligencePlatform() {
@@ -163,24 +162,8 @@ export default function IntelligencePlatform() {
   const [showChat, setShowChat] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
 
-  // Check if platform key is configured on the backend (when no BYOK is set)
-  useEffect(() => {
-    if (aiConfig.apiKey) return; // Already have BYOK, no need to check
-    getAIStatus().then(status => {
-      if (status.available && status.source === 'platform') {
-        setAIConfig(prev => ({
-          ...prev,
-          provider: status.provider || 'anthropic',
-          model: status.model || prev.model,
-          source: 'platform',
-        }));
-      }
-    }).catch(() => {}); // Silently ignore if backend unreachable
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
   const handleSaveAIConfig = (config) => {
-    const updated = { ...config, source: config.apiKey ? 'byok' : null };
-    setAIConfig(updated);
+    setAIConfig(config);
     if (config.apiKey) sessionStorage.setItem('intel_ai_key', config.apiKey);
     else sessionStorage.removeItem('intel_ai_key');
   };
@@ -271,7 +254,7 @@ export default function IntelligencePlatform() {
       </div>
 
       {/* AI status pill */}
-      {(aiConfig.apiKey || aiConfig.source === 'platform') ? (
+      {aiConfig.apiKey ? (
         <div className="flex items-center gap-2 mb-5 px-3 py-1.5 bg-emerald-50 border border-emerald-200 rounded-full w-fit">
           <span className="relative flex h-2 w-2">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
@@ -280,12 +263,6 @@ export default function IntelligencePlatform() {
           <span className="text-xs font-semibold text-emerald-700">AI active</span>
           <span className="text-emerald-300">·</span>
           <Badge variant="indigo" className="text-xs">{aiConfig.provider} / {aiConfig.model}</Badge>
-          {aiConfig.source === 'platform' && (
-            <>
-              <span className="text-emerald-300">·</span>
-              <span className="text-xs text-emerald-600">platform key</span>
-            </>
-          )}
         </div>
       ) : (
         <div className="flex items-center gap-2 mb-5 px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-full w-fit">
