@@ -1,13 +1,21 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 body {
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: 'Manrope', system-ui, sans-serif;
   background-color: #F9FAFB;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
+
+/* Thin scrollbars */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #D1D5DB; border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: #9CA3AF; }
 
 /* Custom range input styling */
 input[type='range'] {
@@ -35,4 +43,9 @@ input[type='range']::-moz-range-thumb {
   background: #6366F1;
   cursor: pointer;
   border: none;
+}
+
+/* Smooth transitions for all interactive elements */
+button, a, input, select, textarea {
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
 }
