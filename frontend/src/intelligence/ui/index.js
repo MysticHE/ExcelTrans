@@ -140,7 +140,7 @@ export function Textarea({ className, ...props }) {
 // ── Toggle (pill switch with label/desc) ──────────────────────────────────────
 export function Toggle({ label, desc, value, onChange }) {
   return (
-    <div className="flex items-center justify-between py-3 border-b border-gray-100 last:border-0">
+    <div className="flex w-full items-center justify-between py-3 border-b border-gray-100 last:border-0">
       <div className="mr-4">
         <p className="text-sm font-medium text-gray-800">{label}</p>
         {desc && <p className="text-xs text-gray-500 mt-0.5">{desc}</p>}
