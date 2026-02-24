@@ -60,6 +60,7 @@ def exact_match(rows_a: List[Dict], rows_b: List[Dict],
 
     matched_pairs = []
     matched_b_indices = set()
+    matched_a_indices = set()
 
     for i, row in enumerate(rows_a):
         key = make_key(row, key_fields)
@@ -67,9 +68,9 @@ def exact_match(rows_a: List[Dict], rows_b: List[Dict],
             j = index_b[key]
             matched_pairs.append((i, j))
             matched_b_indices.add(j)
+            matched_a_indices.add(i)
 
-    only_in_a = [i for i in range(len(rows_a))
-                 if make_key(rows_a[i], key_fields) not in index_b]
+    only_in_a = [i for i in range(len(rows_a)) if i not in matched_a_indices]
     only_in_b = [j for j in range(len(rows_b))
                  if j not in matched_b_indices]
 
@@ -100,20 +101,18 @@ def fuzzy_match(rows_a: List[Dict], rows_b: List[Dict],
 
     keys_a = [make_key(row, key_fields) for row in rows_a]
     keys_b = [make_key(row, key_fields) for row in rows_b]
+    keys_b_index = {key: j for j, key in enumerate(keys_b)}
 
     matched_pairs = []
     used_b = set()
 
     for i, key_a in enumerate(keys_a):
-        # Try exact first
-        try:
-            j = keys_b.index(key_a)
-            if j not in used_b:
-                matched_pairs.append((i, j))
-                used_b.add(j)
-                continue
-        except ValueError:
-            pass
+        # Try exact first via O(1) lookup
+        j = keys_b_index.get(key_a)
+        if j is not None and j not in used_b:
+            matched_pairs.append((i, j))
+            used_b.add(j)
+            continue
 
         # Fuzzy fallback
         best_score = threshold

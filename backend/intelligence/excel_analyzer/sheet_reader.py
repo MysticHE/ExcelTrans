@@ -16,7 +16,7 @@ def read_sheet_dual_pass(filepath: str) -> Dict[str, Any]:
     Returns a dict keyed by sheet name with cell-level data merged.
     """
     formula_wb = openpyxl.load_workbook(filepath, data_only=False)
-    value_wb = openpyxl.load_workbook(filepath, data_only=True)
+    value_wb = openpyxl.load_workbook(filepath, data_only=True, read_only=True)
 
     sheets = {}
     for sheet_name in formula_wb.sheetnames:
@@ -24,9 +24,13 @@ def read_sheet_dual_pass(filepath: str) -> Dict[str, Any]:
         v_ws = value_wb[sheet_name] if sheet_name in value_wb.sheetnames else None
 
         rows = []
-        for row_idx, row in enumerate(f_ws.iter_rows(), start=1):
+        v_row_iter = v_ws.iter_rows() if v_ws is not None else None
+        for row_idx, f_row in enumerate(f_ws.iter_rows(), start=1):
+            v_row = next(v_row_iter) if v_row_iter is not None else None
+            v_vals = {vc.column: vc.value for vc in v_row} if v_row else {}
+
             row_data = []
-            for cell in row:
+            for cell in f_row:
                 # MergedCell placeholders cover non-anchor positions of merged ranges.
                 # They have no value, formula, or column_letter — treat as empty.
                 if isinstance(cell, MergedCell):
@@ -41,15 +45,11 @@ def read_sheet_dual_pass(filepath: str) -> Dict[str, Any]:
                     })
                     continue
 
-                coord = cell.coordinate
                 formula_val = cell.value
                 is_formula = isinstance(formula_val, str) and formula_val.startswith('=')
 
-                # Get computed value from second pass
-                computed = None
-                if v_ws is not None:
-                    v_cell = v_ws[coord]
-                    computed = v_cell.value if not isinstance(v_cell, MergedCell) else None
+                # Get computed value from second pass via O(1) column lookup
+                computed = v_vals.get(cell.column)
 
                 row_data.append({
                     'row': row_idx,

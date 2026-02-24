@@ -59,6 +59,12 @@ def _cleanup_sessions():
                             os.unlink(path)
                         except OSError:
                             pass
+                    result_path = session.get('result', {}).get('path')
+                    if result_path:
+                        try:
+                            os.unlink(result_path)
+                        except OSError:
+                            pass
         if expired:
             logger.info(f"Cleaned up {len(expired)} expired intel sessions")
 
@@ -329,9 +335,12 @@ def process():
         logger.error(f"Report generation failed: {e}")
         return jsonify({'error': f'Report generation failed: {str(e)}'}), 500
 
-    # Store result in session for download
+    # Write report to a temp file — avoids holding large bytes in memory dict
     result_id = str(uuid.uuid4())
-    session['result'] = {'id': result_id, 'bytes': report_bytes, 'summary': result['summary']}
+    tmp_report = tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx')
+    tmp_report.write(report_bytes)
+    tmp_report.close()
+    session['result'] = {'id': result_id, 'path': tmp_report.name, 'summary': result['summary']}
     _set_session(session_id, session)
 
     # Resolve filename template variables: {date}, {file_a}, {file_b}
@@ -367,12 +376,15 @@ def download(session_id, result_id):
     if not result_data or result_data.get('id') != result_id:
         return jsonify({'error': 'Result not found'}), 404
 
-    report_bytes = result_data['bytes']
+    report_path = result_data.get('path')
+    if not report_path or not os.path.exists(report_path):
+        return jsonify({'error': 'Report file not found. Please regenerate.'}), 404
+
     date_str = datetime.now().strftime('%Y%m%d')
     filename = f'comparison_{date_str}.xlsx'
 
     return send_file(
-        io.BytesIO(report_bytes),
+        report_path,
         mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         as_attachment=True,
         download_name=filename,

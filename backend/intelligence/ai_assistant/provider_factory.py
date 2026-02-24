@@ -27,13 +27,12 @@ class BaseAIProvider(ABC):
 
 class AnthropicProvider(BaseAIProvider):
     def __init__(self, api_key: str, model: str = 'claude-haiku-4-5-20251001'):
-        self.api_key = api_key
+        import anthropic
         self.model = model
+        self.client = anthropic.Anthropic(api_key=api_key)
 
     def complete(self, system: str, user: str, max_tokens: int = 1024) -> str:
-        import anthropic
-        client = anthropic.Anthropic(api_key=self.api_key)
-        message = client.messages.create(
+        message = self.client.messages.create(
             model=self.model,
             max_tokens=max_tokens,
             system=system,
@@ -44,13 +43,12 @@ class AnthropicProvider(BaseAIProvider):
 
 class OpenAIProvider(BaseAIProvider):
     def __init__(self, api_key: str, model: str = 'gpt-4o-mini'):
-        self.api_key = api_key
+        from openai import OpenAI
         self.model = model
+        self.client = OpenAI(api_key=api_key)
 
     def complete(self, system: str, user: str, max_tokens: int = 1024) -> str:
-        from openai import OpenAI
-        client = OpenAI(api_key=self.api_key)
-        response = client.chat.completions.create(
+        response = self.client.chat.completions.create(
             model=self.model,
             max_tokens=max_tokens,
             messages=[
@@ -63,14 +61,14 @@ class OpenAIProvider(BaseAIProvider):
 
 class GeminiProvider(BaseAIProvider):
     def __init__(self, api_key: str, model: str = 'gemini-2.0-flash'):
-        self.api_key = api_key
+        from google import genai
         self.model = model
+        self._genai = genai
+        self.client = genai.Client(api_key=api_key)
 
     def complete(self, system: str, user: str, max_tokens: int = 1024) -> str:
-        from google import genai
         from google.genai import types
-        client = genai.Client(api_key=self.api_key)
-        response = client.models.generate_content(
+        response = self.client.models.generate_content(
             model=self.model,
             config=types.GenerateContentConfig(
                 system_instruction=system,

@@ -10,8 +10,11 @@ from typing import Any, Dict, List, Optional
 from datetime import datetime
 
 
+_CHANGED_FILL = PatternFill(start_color='FFEB9C', end_color='FFEB9C', fill_type='solid')
+
+
 def _hex_to_fill(hex_color: Optional[str]) -> Optional[PatternFill]:
-    """Convert #RRGGBB to openpyxl PatternFill. Always create new Fill objects."""
+    """Convert #RRGGBB to openpyxl PatternFill."""
     if not hex_color:
         return None
     color = hex_color.lstrip('#')
@@ -101,12 +104,20 @@ def build_comparison_report(
         cell.font = _make_header_font()
         cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
 
+    # Per-report fill cache: reuse PatternFill objects for identical row colors
+    fill_cache: dict = {}
+
+    def _get_fill(hex_color: str) -> PatternFill:
+        if hex_color not in fill_cache:
+            fill_cache[hex_color] = _hex_to_fill(hex_color)
+        return fill_cache[hex_color]
+
     # Write data rows — track column widths inline
     for row_idx, row_data in enumerate(result.get('rows', []), start=2):
         row_color = row_data.get('color')
         changed_fields = set(row_data.get('changed_fields', []))
-        row_fill = _hex_to_fill(row_color)
         output_cols_data = row_data.get('output_columns', {})
+        row_fill = _get_fill(row_color) if row_color else None
 
         for col_idx, field in enumerate(all_headers, start=1):
             # Determine cell value based on field type
@@ -124,17 +135,13 @@ def build_comparison_report(
             if value is not None:
                 col_widths[col_idx - 1] = min(40, max(col_widths[col_idx - 1], len(str(value))))
 
-            # Row-level coloring
+            # Row-level coloring (reuses cached fill object)
             if row_fill:
-                cell.fill = PatternFill(
-                    start_color=row_fill.start_color.rgb,
-                    end_color=row_fill.end_color.rgb,
-                    fill_type='solid'
-                )
+                cell.fill = row_fill
 
-            # Override with cell-level change highlight if applicable
+            # Override with cell-level change highlight if applicable (reuses module singleton)
             if highlight_changed_cells and field in changed_fields and row_color is None:
-                cell.fill = PatternFill(start_color='FFEB9C', end_color='FFEB9C', fill_type='solid')
+                cell.fill = _CHANGED_FILL
 
     # Apply collected column widths
     for col_idx, width in enumerate(col_widths, start=1):
