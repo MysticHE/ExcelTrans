@@ -108,7 +108,7 @@ export default function Step5_OutputConfig({ wizard }) {
       </div>
 
       {/* Toggles */}
-      <div className="bg-gray-50 rounded-xl p-4 border border-gray-100 overflow-hidden">
+      <div className="bg-gray-50 rounded-xl p-4 border border-gray-100">
         <Toggle
           label="Add Remarks Column"
           desc="Append outcome labels as a column in the report"

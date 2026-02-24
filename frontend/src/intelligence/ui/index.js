@@ -151,7 +151,7 @@ export function Toggle({ label, desc, value, onChange }) {
         aria-checked={value}
         onClick={() => onChange(!value)}
         className={cn(
-          'relative flex-shrink-0 w-11 h-6 rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2',
+          'relative overflow-hidden flex-shrink-0 w-11 h-6 rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2',
           value ? 'bg-indigo-500' : 'bg-gray-300'
         )}
       >
