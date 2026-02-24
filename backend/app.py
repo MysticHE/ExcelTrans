@@ -1,12 +1,19 @@
 import os
 from flask import Flask
 from flask_cors import CORS
+from extensions import limiter
 from intelligence import intel_bp
 
 app = Flask(__name__)
 
-# Allow requests from any origin (frontend on GitHub Pages / Render Static)
-CORS(app, resources={r"/api/*": {"origins": "*"}})
+ALLOWED_ORIGINS = [
+    'https://exceltrans-frontend.onrender.com',
+    'http://localhost:3000',
+]
+
+CORS(app, resources={r"/api/*": {"origins": ALLOWED_ORIGINS}})
+
+limiter.init_app(app)
 
 app.register_blueprint(intel_bp)
 

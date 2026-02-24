@@ -14,6 +14,7 @@ from typing import Any, Dict, Optional
 
 import pandas as pd
 from flask import Blueprint, jsonify, request, send_file
+from extensions import limiter
 
 from .excel_analyzer import (
     read_sheet_dual_pass, extract_values_grid, get_formula_cells,
@@ -402,6 +403,7 @@ def save_template():
 # ── AI Endpoints ──────────────────────────────────────────────────────────────
 
 @intel_bp.route('/ai/suggest', methods=['POST'])
+@limiter.limit("20 per minute;100 per day")
 def ai_suggest():
     """Suggest a template from column analysis (uses AI or heuristic fallback)."""
     body = request.get_json() or {}
@@ -429,6 +431,7 @@ def ai_suggest():
 
 
 @intel_bp.route('/ai/nl-to-rule', methods=['POST'])
+@limiter.limit("20 per minute;100 per day")
 def nl_to_rule():
     """Convert natural language description to a validated rule JSON card."""
     body = request.get_json() or {}
@@ -455,6 +458,7 @@ def nl_to_rule():
 
 
 @intel_bp.route('/ai/chat', methods=['POST'])
+@limiter.limit("30 per minute;200 per day")
 def ai_chat():
     """Context-aware AI chat for wizard assistance."""
     body = request.get_json() or {}
@@ -478,6 +482,7 @@ def ai_chat():
 
 
 @intel_bp.route('/ai/test', methods=['POST'])
+@limiter.limit("5 per minute;20 per day")
 def ai_test():
     """Test an AI provider key without storing it."""
     provider, err = _get_ai_provider_from_request()

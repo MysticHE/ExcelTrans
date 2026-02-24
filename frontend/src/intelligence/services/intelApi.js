@@ -1,4 +1,10 @@
-const BASE = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+const BASE = (() => {
+  const url = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+  if (process.env.NODE_ENV === 'production' && url.startsWith('http://')) {
+    return url.replace('http://', 'https://');
+  }
+  return url;
+})();
 
 function getAIHeaders(aiConfig) {
   if (!aiConfig) return {};
