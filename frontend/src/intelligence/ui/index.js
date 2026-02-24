@@ -151,14 +151,14 @@ export function Toggle({ label, desc, value, onChange }) {
         aria-checked={value}
         onClick={() => onChange(!value)}
         className={cn(
-          'relative overflow-hidden flex-shrink-0 w-11 h-6 rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2',
+          'relative flex-shrink-0 w-11 h-6 rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2',
           value ? 'bg-indigo-500' : 'bg-gray-300'
         )}
       >
         <span
           className={cn(
-            'absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200',
-            value ? 'translate-x-6' : 'translate-x-1'
+            'absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-all duration-200',
+            value ? 'left-6' : 'left-1'
           )}
         />
       </button>
