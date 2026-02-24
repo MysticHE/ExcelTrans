@@ -538,6 +538,18 @@ def ai_test():
         return jsonify({'success': False, 'error': str(e)}), 400
 
 
+@intel_bp.route('/ai/status', methods=['GET'])
+def ai_status():
+    """Return whether AI is available and via which source (platform key or BYOK)."""
+    has_platform_key = bool(os.environ.get('ANTHROPIC_API_KEY', ''))
+    return jsonify({
+        'available': has_platform_key,
+        'source': 'platform' if has_platform_key else None,
+        'provider': 'anthropic' if has_platform_key else None,
+        'model': 'claude-haiku-4-5-20251001' if has_platform_key else None,
+    })
+
+
 @intel_bp.route('/providers', methods=['GET'])
 def list_providers():
     """Return available AI providers and their models."""
