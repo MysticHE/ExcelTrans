@@ -6,7 +6,7 @@ import {
 import {
   Key, GitCompare, Eye, EyeOff, AlertTriangle, ArrowRight,
   Search, ChevronDown, ChevronRight, Sigma, GripVertical,
-  AlertCircle, ChevronUp,
+  AlertCircle, ChevronUp, Pencil, Check, X,
 } from 'lucide-react';
 import { Alert, Button, Badge, cn } from '../ui';
 
@@ -20,19 +20,38 @@ const ROLE_LABELS = {
 };
 
 const TYPE_BADGE_VARIANT = {
-  formula: 'orange',
-  date:    'purple',
-  numeric: 'blue',
-  text:    'gray',
-  empty:   'gray',
+  formula: 'orange', date: 'purple', numeric: 'blue', text: 'gray', empty: 'gray',
 };
+
+// 8 distinct color schemes for occurrence slots — avoids role colors (blue/green/purple/gray)
+const OCCURRENCE_COLORS = [
+  { bg: 'bg-orange-100',  text: 'text-orange-800',  border: 'border-orange-300',  dot: 'bg-orange-400',  chipBg: 'bg-orange-50'  },
+  { bg: 'bg-teal-100',    text: 'text-teal-800',    border: 'border-teal-300',    dot: 'bg-teal-500',    chipBg: 'bg-teal-50'    },
+  { bg: 'bg-rose-100',    text: 'text-rose-800',    border: 'border-rose-300',    dot: 'bg-rose-400',    chipBg: 'bg-rose-50'    },
+  { bg: 'bg-lime-100',    text: 'text-lime-800',    border: 'border-lime-300',    dot: 'bg-lime-500',    chipBg: 'bg-lime-50'    },
+  { bg: 'bg-violet-100',  text: 'text-violet-800',  border: 'border-violet-300',  dot: 'bg-violet-400',  chipBg: 'bg-violet-50'  },
+  { bg: 'bg-amber-100',   text: 'text-amber-800',   border: 'border-amber-300',   dot: 'bg-amber-500',   chipBg: 'bg-amber-50'   },
+  { bg: 'bg-cyan-100',    text: 'text-cyan-800',    border: 'border-cyan-300',    dot: 'bg-cyan-500',    chipBg: 'bg-cyan-50'    },
+  { bg: 'bg-fuchsia-100', text: 'text-fuchsia-800', border: 'border-fuchsia-300', dot: 'bg-fuchsia-400', chipBg: 'bg-fuchsia-50' },
+];
 
 const KEY_PATTERNS = /\b(id|nric|staff[_\s]?id|employee[_\s]?id|code|fin|ic|ref|no\.?)\b/i;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
+/** 0-based column index → Excel letter (A, B, …, Z, AA, AB, …) */
+function indexToColLetter(idx) {
+  let result = '';
+  let n = idx + 1;
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    result = String.fromCharCode(65 + rem) + result;
+    n = Math.floor((n - 1) / 26);
+  }
+  return result;
+}
+
 function getSmartDefault(col) {
-  // Empty columns always go to Ignore
   if (col.detected_type === 'empty') return 'ignored_fields';
   const n = col.name?.toLowerCase() || '';
   if (KEY_PATTERNS.test(n)) return 'unique_key';
@@ -41,18 +60,17 @@ function getSmartDefault(col) {
   return 'display_fields';
 }
 
-// Structural types that always win regardless of saved state
+// Structural types always win — never overridden by saved state
 const STRUCTURAL_ROLES = { empty: 'ignored_fields', formula: 'display_fields' };
 
 function buildInitialRoleMap(cols, mapping) {
   const map = {};
   cols.forEach(col => { map[col.index] = getSmartDefault(col); });
-  // Apply explicit mapping — but structural types (empty/formula) always keep their smart default
   const applyMapping = (names, role) => {
     if (!names?.length) return;
     const nameSet = new Set(names);
     cols.forEach(col => {
-      if (STRUCTURAL_ROLES[col.detected_type]) return; // never override structural
+      if (STRUCTURAL_ROLES[col.detected_type]) return;
       if (nameSet.has(col.name)) map[col.index] = role;
     });
   };
@@ -75,29 +93,26 @@ function computeSuggested(cols, mapping) {
   return suggested;
 }
 
-/** Detect duplicate column names and compute auto group labels by proximity */
+/** Detect duplicate column names; compute auto group labels from neighboring columns */
 function detectDuplicateGroups(allColumns) {
   const nameCounts = {};
   allColumns.forEach(c => { nameCounts[c.name] = (nameCounts[c.name] || 0) + 1; });
   const dupNames = new Set(Object.keys(nameCounts).filter(n => nameCounts[n] > 1));
 
-  const groupMap = {}; // col.index → auto groupLabel
-
+  const groupMap = {};
   dupNames.forEach(name => {
     const dups = allColumns.filter(c => c.name === name).sort((a, b) => a.index - b.index);
     dups.forEach((col, i) => {
       if (i === 0) {
-        // Look backward for nearest non-duplicate column
         const prevCols = allColumns.filter(c => c.index < col.index && !dupNames.has(c.name));
         const nearest = prevCols[prevCols.length - 1];
-        groupMap[col.index] = nearest ? nearest.name.slice(0, 20) : `Group ${i + 1}`;
+        groupMap[col.index] = nearest ? nearest.name : `Group ${i + 1}`;
       } else {
-        // Look for separator columns between previous occurrence and this one
         const prev = dups[i - 1];
         const between = allColumns.filter(
           c => c.index > prev.index && c.index < col.index && !dupNames.has(c.name)
         );
-        groupMap[col.index] = between.length > 0 ? between[0].name.slice(0, 20) : `Group ${i + 1}`;
+        groupMap[col.index] = between.length > 0 ? between[0].name : `Group ${i + 1}`;
       }
     });
   });
@@ -105,12 +120,70 @@ function detectDuplicateGroups(allColumns) {
   return { dupNames, groupMap };
 }
 
+// ─── GroupLabelEditor ─────────────────────────────────────────────────────────
+
+function GroupLabelEditor({ label, color, onSave }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(label);
+  const inputRef = useRef(null);
+
+  // Sync external label changes (e.g. auto-label update)
+  useEffect(() => { if (!editing) setValue(label); }, [label, editing]);
+  useEffect(() => { if (editing && inputRef.current) inputRef.current.focus(); }, [editing]);
+
+  const commit = () => {
+    const trimmed = value.trim();
+    if (trimmed) onSave(trimmed);
+    else setValue(label);
+    setEditing(false);
+  };
+
+  const cancel = () => { setValue(label); setEditing(false); };
+
+  if (editing) {
+    return (
+      <div className="flex items-center gap-1">
+        <input
+          ref={inputRef}
+          value={value}
+          onChange={e => setValue(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') cancel(); }}
+          className={cn(
+            'text-xs border rounded px-2 py-1 w-24 focus:outline-none focus:ring-1',
+            color.border, 'focus:ring-current bg-white', color.text
+          )}
+          maxLength={20}
+          placeholder="Short label…"
+        />
+        <button onClick={commit} className="text-green-600 hover:text-green-700"><Check className="w-3.5 h-3.5" /></button>
+        <button onClick={cancel} className="text-gray-400 hover:text-gray-600"><X className="w-3.5 h-3.5" /></button>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      onClick={() => setEditing(true)}
+      className={cn(
+        'inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full font-semibold border transition-all',
+        'hover:shadow-sm active:scale-95',
+        color.bg, color.text, color.border
+      )}
+      title="Click to rename this group label"
+    >
+      {label.length > 18 ? label.slice(0, 18) + '…' : label}
+      <Pencil className="w-2.5 h-2.5 opacity-50" />
+    </button>
+  );
+}
+
 // ─── DraggableChip ───────────────────────────────────────────────────────────
 
-function DraggableChip({ col, role, suggested, displayName, groupLabel, isFiltered }) {
+function DraggableChip({ col, role, suggested, groupLabel, groupColor, isFiltered }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: col.index });
   const { dotColor } = ROLE_LABELS[role] || ROLE_LABELS.display_fields;
   const typeVariant = TYPE_BADGE_VARIANT[col.detected_type] || 'gray';
+  const colLetter = indexToColLetter(col.index);
 
   if (isFiltered) return null;
 
@@ -119,48 +192,61 @@ function DraggableChip({ col, role, suggested, displayName, groupLabel, isFilter
       ref={setNodeRef}
       {...attributes}
       className={cn(
-        'flex items-center gap-1.5 px-2.5 py-1.5 bg-white border rounded-lg text-sm select-none',
-        'transition-opacity',
-        isDragging ? 'opacity-40 shadow-none' : 'shadow-sm hover:shadow-md border-gray-200 hover:border-gray-300'
+        'flex items-center gap-1.5 px-2 py-1.5 border rounded-lg text-sm select-none transition-opacity',
+        groupColor ? groupColor.chipBg : 'bg-white',
+        isDragging ? 'opacity-40 shadow-none border-gray-200' : 'shadow-sm hover:shadow-md border-gray-200 hover:border-gray-300'
       )}
     >
       <button
         {...listeners}
-        className="cursor-grab active:cursor-grabbing p-0.5 -ml-0.5 text-gray-300 hover:text-gray-500 shrink-0"
+        className="cursor-grab active:cursor-grabbing p-0.5 text-gray-300 hover:text-gray-500 shrink-0"
         tabIndex={-1}
         aria-label="drag handle"
       >
         <GripVertical className="w-3.5 h-3.5" />
       </button>
+      {/* Role color dot */}
       <span className={cn('w-2 h-2 rounded-full shrink-0', dotColor)} />
-      <span className="font-medium text-gray-800 truncate max-w-[120px]">{displayName}</span>
-      {groupLabel && (
-        <span className="text-xs px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-700 font-semibold shrink-0">
-          {groupLabel}
+      {/* Column name */}
+      <span className="font-medium text-gray-800 truncate max-w-[100px]">{col.name}</span>
+      {/* Column position tag */}
+      <span className="text-[10px] font-mono text-gray-400 shrink-0">{colLetter}</span>
+      {/* Group label badge (colored, matches panel) */}
+      {groupLabel && groupColor && (
+        <span className={cn(
+          'text-xs px-1.5 py-0.5 rounded-full font-semibold border shrink-0',
+          groupColor.bg, groupColor.text, groupColor.border
+        )}>
+          {groupLabel.length > 12 ? groupLabel.slice(0, 12) + '…' : groupLabel}
         </span>
       )}
       {suggested && (
-        <span className="text-xs bg-indigo-50 text-indigo-500 border border-indigo-200 px-1 rounded shrink-0">
-          auto
-        </span>
+        <span className="text-[10px] bg-indigo-50 text-indigo-500 border border-indigo-200 px-1 rounded shrink-0">auto</span>
       )}
       <Badge variant={typeVariant} className="shrink-0 !text-[10px] !px-1 !py-0">{col.detected_type}</Badge>
     </div>
   );
 }
 
-/** Floating chip shown during drag */
-function DragChip({ col, displayName, groupLabel }) {
-  const { dotColor } = ROLE_LABELS.display_fields;
+/** Floating chip rendered during drag via DragOverlay */
+function DragChip({ col, groupLabel, groupColor }) {
   const typeVariant = TYPE_BADGE_VARIANT[col.detected_type] || 'gray';
+  const colLetter = indexToColLetter(col.index);
   return (
-    <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-indigo-400 rounded-lg shadow-xl text-sm pointer-events-none opacity-95">
+    <div className={cn(
+      'flex items-center gap-1.5 px-2 py-1.5 border-2 border-indigo-400 rounded-lg shadow-2xl text-sm pointer-events-none',
+      groupColor ? groupColor.chipBg : 'bg-white'
+    )}>
       <GripVertical className="w-3.5 h-3.5 text-gray-300" />
-      <span className={cn('w-2 h-2 rounded-full shrink-0', dotColor)} />
-      <span className="font-medium text-gray-800 truncate max-w-[120px]">{displayName}</span>
-      {groupLabel && (
-        <span className="text-xs px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-700 font-semibold shrink-0">
-          {groupLabel}
+      <span className="w-2 h-2 rounded-full bg-gray-300 shrink-0" />
+      <span className="font-medium text-gray-800 truncate max-w-[100px]">{col.name}</span>
+      <span className="text-[10px] font-mono text-gray-400 shrink-0">{colLetter}</span>
+      {groupLabel && groupColor && (
+        <span className={cn(
+          'text-xs px-1.5 py-0.5 rounded-full font-semibold border shrink-0',
+          groupColor.bg, groupColor.text, groupColor.border
+        )}>
+          {groupLabel.length > 12 ? groupLabel.slice(0, 12) + '…' : groupLabel}
         </span>
       )}
       <Badge variant={typeVariant} className="shrink-0 !text-[10px] !px-1 !py-0">{col.detected_type}</Badge>
@@ -170,41 +256,45 @@ function DragChip({ col, displayName, groupLabel }) {
 
 // ─── DroppableZone ───────────────────────────────────────────────────────────
 
-function DroppableZone({ roleKey, info, columns, allColumns, roleMap, suggestedSet, displayNameMap, dupNames, groupMap, userGroupMap, colSearch, onEditGroup }) {
+function DroppableZone({
+  roleKey, info, columns, suggestedSet,
+  dupNames, groupMap, userGroupMap, occurrenceColorMap, colSearch,
+}) {
   const { isOver, setNodeRef } = useDroppable({ id: roleKey });
   const [collapsed, setCollapsed] = useState(false);
-  const { Icon, label, desc, color, border, bg, ring, badgeVariant } = info;
+  const [zoneSearch, setZoneSearch] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchInputRef = useRef(null);
+  const { Icon, label, desc, color, border, ring, badgeVariant } = info;
 
-  const borderColor = {
-    blue:   'border-blue-200',
-    green:  'border-green-200',
-    purple: 'border-purple-200',
-    gray:   'border-gray-200',
-  }[color];
+  const borderColor = { blue: 'border-blue-200', green: 'border-green-200', purple: 'border-purple-200', gray: 'border-gray-200' }[color];
+  const headerColor = { blue: 'text-blue-700',   green: 'text-green-700',   purple: 'text-purple-700',   gray: 'text-gray-600'  }[color];
+  const overBorder  = { blue: 'border-blue-400', green: 'border-green-400', purple: 'border-purple-400', gray: 'border-gray-400' }[color];
+  const overBg      = { blue: 'bg-blue-50/60',   green: 'bg-green-50/60',   purple: 'bg-purple-50/60',   gray: 'bg-gray-100/60' }[color];
+  const focusRing   = { blue: 'focus:ring-blue-300', green: 'focus:ring-green-300', purple: 'focus:ring-purple-300', gray: 'focus:ring-gray-300' }[color];
 
-  const headerColor = {
-    blue:   'text-blue-700',
-    green:  'text-green-700',
-    purple: 'text-purple-700',
-    gray:   'text-gray-600',
-  }[color];
+  // combined: global search OR zone-local search
+  const query = (zoneSearch || colSearch).toLowerCase();
 
-  const overBorder = {
-    blue:   'border-blue-400',
-    green:  'border-green-400',
-    purple: 'border-purple-400',
-    gray:   'border-gray-400',
-  }[color];
+  const openSearch = (e) => {
+    e.stopPropagation();
+    setSearchOpen(true);
+    setCollapsed(false);
+    setTimeout(() => searchInputRef.current?.focus(), 50);
+  };
 
-  const overBg = {
-    blue:   'bg-blue-50/60',
-    green:  'bg-green-50/60',
-    purple: 'bg-purple-50/60',
-    gray:   'bg-gray-100/60',
-  }[color];
+  const closeSearch = (e) => {
+    e?.stopPropagation();
+    setSearchOpen(false);
+    setZoneSearch('');
+  };
 
-  const chipCount = columns.length;
-  const query = colSearch.toLowerCase();
+  const visibleCount = columns.filter(col => {
+    if (!query) return true;
+    const isDup = dupNames.has(col.name);
+    const gl = isDup ? (userGroupMap[col.index] || groupMap[col.index] || '') : '';
+    return col.name.toLowerCase().includes(query) || gl.toLowerCase().includes(query);
+  }).length;
 
   return (
     <div
@@ -216,53 +306,104 @@ function DroppableZone({ roleKey, info, columns, allColumns, roleMap, suggestedS
     >
       {/* Zone header */}
       <div
-        className={cn(
-          'flex items-center gap-2 px-3 py-2 cursor-pointer select-none',
-          isOver ? overBg : 'hover:bg-gray-50/50'
-        )}
-        onClick={() => setCollapsed(c => !c)}
+        className={cn('flex items-center gap-2 px-3 py-2 select-none', isOver ? overBg : 'hover:bg-gray-50/50')}
       >
-        <Icon className={cn('w-4 h-4 shrink-0', headerColor)} />
-        <span className={cn('text-sm font-semibold', headerColor)}>{label}</span>
-        <span className="text-xs text-gray-400 hidden sm:inline">— {desc}</span>
-        <Badge variant={badgeVariant} className="ml-auto shrink-0">{chipCount}</Badge>
-        {collapsed
-          ? <ChevronRight className="w-4 h-4 text-gray-400 shrink-0" />
-          : <ChevronUp className="w-4 h-4 text-gray-400 shrink-0" />}
+        {/* Left — click to collapse */}
+        <button
+          type="button"
+          className="flex items-center gap-2 flex-1 min-w-0 cursor-pointer text-left"
+          onClick={() => setCollapsed(c => !c)}
+        >
+          <Icon className={cn('w-4 h-4 shrink-0', headerColor)} />
+          <span className={cn('text-sm font-semibold', headerColor)}>{label}</span>
+          <span className="text-xs text-gray-400 hidden sm:inline truncate">— {desc}</span>
+        </button>
+
+        {/* Right controls */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          {/* Zone search input (inline, expands when open) */}
+          {searchOpen ? (
+            <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+              <div className="relative">
+                <Search className={cn('absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3', headerColor)} />
+                <input
+                  ref={searchInputRef}
+                  value={zoneSearch}
+                  onChange={e => setZoneSearch(e.target.value)}
+                  onKeyDown={e => e.key === 'Escape' && closeSearch()}
+                  placeholder="Filter…"
+                  className={cn(
+                    'w-32 pl-6 pr-2 py-1 text-xs border rounded-lg bg-white focus:outline-none focus:ring-1',
+                    borderColor, focusRing
+                  )}
+                />
+              </div>
+              {zoneSearch && (
+                <span className="text-xs text-gray-400">{visibleCount}/{columns.length}</span>
+              )}
+              <button
+                type="button"
+                onClick={closeSearch}
+                className="text-gray-400 hover:text-gray-600 p-0.5"
+                title="Close search"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={openSearch}
+              className={cn('p-1 rounded-lg hover:bg-white/70 transition-colors', headerColor)}
+              title={`Search within ${label}`}
+            >
+              <Search className="w-3.5 h-3.5" />
+            </button>
+          )}
+
+          <Badge variant={badgeVariant} className="shrink-0">{columns.length}</Badge>
+          <button type="button" onClick={() => setCollapsed(c => !c)} className="text-gray-400">
+            {collapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
+          </button>
+        </div>
       </div>
 
       {/* Chip area */}
       {!collapsed && (
-        <div className={cn(
-          'min-h-[52px] px-3 pb-3 flex flex-wrap gap-2 transition-colors',
-          isOver ? overBg : ''
-        )}>
+        <div className={cn('min-h-[52px] px-3 pb-3 flex flex-wrap gap-2', isOver ? overBg : '')}>
           {columns.length === 0 ? (
             <div className={cn(
               'w-full flex items-center justify-center h-10 rounded-lg border-2 border-dashed text-xs text-gray-400',
-              isOver ? 'border-current opacity-70' : 'border-gray-200'
+              isOver ? 'border-current opacity-60' : 'border-gray-200'
             )}>
               Drop columns here
             </div>
           ) : (
             columns.map(col => {
-              const dn = displayNameMap[col.index] || col.name;
-              const gl = dupNames.has(col.name)
-                ? (userGroupMap[col.index] || groupMap[col.index] || `#${col.index}`)
-                : null;
-              const isFiltered = query ? !dn.toLowerCase().includes(query) && !col.name.toLowerCase().includes(query) : false;
+              const isDup = dupNames.has(col.name);
+              const gl = isDup ? (userGroupMap[col.index] || groupMap[col.index] || 'Group') : null;
+              const gc = isDup ? occurrenceColorMap[col.index] : null;
+              const isFiltered = query
+                ? !col.name.toLowerCase().includes(query) && !(gl || '').toLowerCase().includes(query)
+                : false;
               return (
                 <DraggableChip
                   key={col.index}
                   col={col}
                   role={roleKey}
                   suggested={suggestedSet.has(col.index)}
-                  displayName={dn}
                   groupLabel={gl}
+                  groupColor={gc}
                   isFiltered={isFiltered}
                 />
               );
             })
+          )}
+          {/* No-match state */}
+          {query && visibleCount === 0 && columns.length > 0 && (
+            <p className="text-xs text-gray-400 italic w-full text-center py-2">
+              No columns match "{zoneSearch || colSearch}"
+            </p>
           )}
         </div>
       )}
@@ -315,46 +456,107 @@ function FileBDiffPanel({ sheetsA, sheetsB, selectedA, selectedB }) {
   );
 }
 
-// ─── GroupBadgeEditor ────────────────────────────────────────────────────────
+// ─── DuplicatePanel ──────────────────────────────────────────────────────────
 
-function GroupBadgeEditor({ label, onSave }) {
-  const [editing, setEditing] = useState(false);
-  const [value, setValue] = useState(label);
-  const inputRef = useRef(null);
-
-  useEffect(() => {
-    if (editing && inputRef.current) inputRef.current.focus();
-  }, [editing]);
-
-  const commit = () => {
-    const trimmed = value.trim();
-    if (trimmed) onSave(trimmed);
-    else setValue(label);
-    setEditing(false);
-  };
-
-  if (editing) {
-    return (
-      <input
-        ref={inputRef}
-        value={value}
-        onChange={e => setValue(e.target.value)}
-        onBlur={commit}
-        onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') { setValue(label); setEditing(false); } }}
-        className="text-xs border border-indigo-300 rounded px-1.5 py-0.5 w-20 focus:outline-none focus:ring-1 focus:ring-indigo-400 bg-white"
-        maxLength={20}
-      />
-    );
-  }
-
+function DuplicatePanel({ dupGroups, groupMap, userGroupMap, occurrenceColorMap, onSaveLabel }) {
   return (
-    <button
-      onClick={() => setEditing(true)}
-      className="text-xs px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-700 font-semibold hover:bg-indigo-200 transition-colors cursor-pointer"
-      title="Click to rename group"
-    >
-      {label}
-    </button>
+    <div className="border border-yellow-200 rounded-xl overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center gap-2 px-4 py-2.5 bg-yellow-50 border-b border-yellow-200">
+        <AlertCircle className="w-4 h-4 text-yellow-600 shrink-0" />
+        <p className="text-xs font-semibold text-yellow-800 uppercase tracking-wider">
+          Duplicate Column Names Detected
+        </p>
+      </div>
+
+      <div className="p-4 bg-white space-y-4">
+        {/* Explanation */}
+        <div className="text-xs bg-blue-50 border border-blue-100 rounded-lg px-3 py-2.5 text-blue-800 space-y-1">
+          <p><strong>What are these?</strong> Your spreadsheet has multiple columns sharing the same name (e.g. "Age" appears 6 times — once per product group).</p>
+          <p><strong>What to do:</strong></p>
+          <ol className="list-decimal list-inside space-y-0.5 ml-1">
+            <li>Each colored row below = one occurrence. The <span className="font-mono font-semibold">Col B</span> tag shows its position in the spreadsheet.</li>
+            <li>The label (e.g. <em>"GTL Category"</em>) is auto-suggested from the column next to it — click <Pencil className="inline w-2.5 h-2.5" /> to rename it to a short label like <strong>GTL</strong>, <strong>GHS</strong>, <strong>GMM</strong>.</li>
+            <li>In the zones below, find the matching colored chips (e.g. <em>Age [GTL]</em>) and drag them to <strong className="text-green-700">Compare Fields</strong>.</li>
+          </ol>
+        </div>
+
+        {/* One card per duplicate group */}
+        {Object.entries(dupGroups).map(([name, cols]) => (
+          <div key={name}>
+            {/* Group name header */}
+            <div className="flex items-center gap-2 mb-1.5">
+              <span className="text-xs font-semibold text-gray-800 truncate">
+                "{name.length > 40 ? name.slice(0, 40) + '…' : name}"
+              </span>
+              <span className="text-xs text-gray-400 shrink-0">appears {cols.length}× in the spreadsheet</span>
+            </div>
+
+            {/* Table of occurrences */}
+            <div className="border border-gray-200 rounded-lg overflow-hidden divide-y divide-gray-100">
+              {/* Table header */}
+              <div className="grid grid-cols-[20px_48px_1fr_160px] gap-3 items-center px-3 py-1.5 bg-gray-50">
+                <span className="text-[10px] text-gray-400 font-semibold uppercase">#</span>
+                <span className="text-[10px] text-gray-400 font-semibold uppercase">Col</span>
+                <span className="text-[10px] text-gray-400 font-semibold uppercase">Auto-suggested from nearby column</span>
+                <span className="text-[10px] text-gray-400 font-semibold uppercase">Your label (click to rename)</span>
+              </div>
+
+              {cols.map((col, i) => {
+                const color = occurrenceColorMap[col.index] || OCCURRENCE_COLORS[0];
+                const autoLabel = groupMap[col.index] || '';
+                const currentLabel = userGroupMap[col.index] || autoLabel || `Group ${i + 1}`;
+                const colLetter = indexToColLetter(col.index);
+
+                return (
+                  <div
+                    key={col.index}
+                    className="grid grid-cols-[20px_48px_1fr_160px] gap-3 items-center px-3 py-2"
+                  >
+                    {/* Occurrence number with color dot */}
+                    <div className="flex items-center gap-1">
+                      <span className={cn('w-2.5 h-2.5 rounded-full shrink-0', color.dot)} />
+                    </div>
+
+                    {/* Column letter badge */}
+                    <span className={cn(
+                      'text-xs font-mono font-bold px-1.5 py-0.5 rounded text-center border',
+                      color.bg, color.text, color.border
+                    )}>
+                      {colLetter}
+                    </span>
+
+                    {/* Auto-suggested label (greyed out, shows origin) */}
+                    <span
+                      className="text-xs text-gray-500 truncate"
+                      title={autoLabel ? `Neighboring column: "${autoLabel}"` : 'No neighbor detected'}
+                    >
+                      {autoLabel
+                        ? <><span className="text-gray-400 mr-1">←</span>{autoLabel}</>
+                        : <span className="text-gray-300 italic">—</span>
+                      }
+                    </span>
+
+                    {/* Rename label */}
+                    <div>
+                      <GroupLabelEditor
+                        label={currentLabel}
+                        color={color}
+                        onSave={lbl => onSaveLabel(col.index, lbl)}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+
+        <p className="text-xs text-gray-400">
+          After labeling, each chip in the zones below will show the colored label — drag them to the correct role.
+        </p>
+      </div>
+    </div>
   );
 }
 
@@ -369,24 +571,33 @@ export default function Step3_ColumnMapper({ wizard }) {
   const allColumns = selectedSheet?.columns || [];
 
   const formulaColNames = allColumns.filter(c => c.detected_type === 'formula').map(c => c.name);
-  const emptyColNames  = allColumns.filter(c => c.detected_type === 'empty').map(c => c.name);
+  const emptyColNames   = allColumns.filter(c => c.detected_type === 'empty').map(c => c.name);
 
-  // roleMap: { [col.index]: role }
-  const [roleMap, setRoleMap] = useState(() => buildInitialRoleMap(allColumns, state.columnMapping));
+  const [roleMap, setRoleMap]         = useState(() => buildInitialRoleMap(allColumns, state.columnMapping));
   const [suggestedSet, setSuggestedSet] = useState(() => computeSuggested(allColumns, state.columnMapping));
-  const [userGroupMap, setUserGroupMap] = useState({}); // { [col.index]: userLabel }
-  const [activeId, setActiveId] = useState(null);       // col.index of dragged chip
-  const [colSearch, setColSearch] = useState('');
+  const [userGroupMap, setUserGroupMap] = useState({});
+  const [activeId, setActiveId]         = useState(null);
+  const [colSearch, setColSearch]       = useState('');
 
-  // Duplicate detection
   const { dupNames, groupMap } = useMemo(() => detectDuplicateGroups(allColumns), [allColumns]);
 
-  // Display name map: col.index → display name (raw col.name for unique, same for dups — group badge handles disambiguation visually)
-  const displayNameMap = useMemo(() => {
+  /** color map: col.index → OCCURRENCE_COLORS[i] based on order within its dup group */
+  const occurrenceColorMap = useMemo(() => {
     const map = {};
-    allColumns.forEach(col => { map[col.index] = col.name; });
+    dupNames.forEach(name => {
+      const cols = allColumns.filter(c => c.name === name).sort((a, b) => a.index - b.index);
+      cols.forEach((col, i) => { map[col.index] = OCCURRENCE_COLORS[i % OCCURRENCE_COLORS.length]; });
+    });
     return map;
-  }, [allColumns]);
+  }, [dupNames, allColumns]);
+
+  const dupGroups = useMemo(() => {
+    const groups = {};
+    dupNames.forEach(name => {
+      groups[name] = allColumns.filter(c => c.name === name).sort((a, b) => a.index - b.index);
+    });
+    return groups;
+  }, [dupNames, allColumns]);
 
   // Reset when sheet changes
   useEffect(() => {
@@ -403,15 +614,11 @@ export default function Step3_ColumnMapper({ wizard }) {
     setSuggestedSet(prev => { const s = new Set(prev); s.delete(colIndex); return s; });
   };
 
-  const getColsByRole = (role) =>
-    allColumns.filter(col => roleMap[col.index] === role);
+  const getColsByRole = role => allColumns.filter(col => roleMap[col.index] === role);
 
-  // DnD sensors — 8px threshold prevents accidental drags
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
-
   const handleDragStart = ({ active }) => setActiveId(active.id);
-
-  const handleDragEnd = ({ active, over }) => {
+  const handleDragEnd   = ({ active, over }) => {
     setActiveId(null);
     if (!over || !ROLE_LABELS[over.id]) return;
     handleRoleChange(active.id, over.id);
@@ -419,7 +626,6 @@ export default function Step3_ColumnMapper({ wizard }) {
 
   const activeCol = activeId != null ? allColumns.find(c => c.index === activeId) : null;
 
-  // Bulk actions (operate on col.index keys)
   const handleBulkSetCompare = () => {
     setRoleMap(prev => {
       const next = { ...prev };
@@ -437,8 +643,7 @@ export default function Step3_ColumnMapper({ wizard }) {
   };
 
   const handleContinue = () => {
-    // Build output: disambiguated names for duplicates
-    const buildNames = (role) =>
+    const buildNames = role =>
       getColsByRole(role).map(col => {
         if (dupNames.has(col.name)) {
           const gl = userGroupMap[col.index] || groupMap[col.index] || col.index;
@@ -459,18 +664,9 @@ export default function Step3_ColumnMapper({ wizard }) {
     });
   };
 
-  const canContinue = getColsByRole('unique_key').length > 0;
+  const canContinue    = getColsByRole('unique_key').length > 0;
   const hasCompareFields = getColsByRole('compare_fields').length > 0;
-  const hasDuplicates = dupNames.size > 0;
-
-  // Group duplicate columns by name for the panel
-  const dupGroups = useMemo(() => {
-    const groups = {};
-    dupNames.forEach(name => {
-      groups[name] = allColumns.filter(c => c.name === name).sort((a, b) => a.index - b.index);
-    });
-    return groups;
-  }, [dupNames, allColumns]);
+  const hasDuplicates  = dupNames.size > 0;
 
   return (
     <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
@@ -490,76 +686,28 @@ export default function Step3_ColumnMapper({ wizard }) {
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
             <input
               className="w-full pl-8 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400"
-              placeholder="Filter columns by name..."
+              placeholder="Filter columns by name or label…"
               value={colSearch}
               onChange={e => setColSearch(e.target.value)}
             />
           </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-xs border border-gray-200 hover:border-green-300 hover:bg-green-50 hover:text-green-700 whitespace-nowrap"
-            onClick={handleBulkSetCompare}
-          >
+          <Button variant="ghost" size="sm" className="text-xs border border-gray-200 hover:border-green-300 hover:bg-green-50 hover:text-green-700 whitespace-nowrap" onClick={handleBulkSetCompare}>
             Set unassigned → Compare
           </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-xs border border-gray-200 hover:border-gray-300 whitespace-nowrap"
-            onClick={handleBulkResetDisplay}
-          >
+          <Button variant="ghost" size="sm" className="text-xs border border-gray-200 hover:border-gray-300 whitespace-nowrap" onClick={handleBulkResetDisplay}>
             Reset all → Display
           </Button>
         </div>
 
-        {/* Duplicate column detection panel */}
+        {/* Duplicate panel */}
         {hasDuplicates && (
-          <div className="bg-yellow-50 border border-yellow-200 rounded-xl overflow-hidden">
-            {/* Header */}
-            <div className="flex items-center gap-2 px-4 py-2.5 bg-yellow-100/60 border-b border-yellow-200">
-              <AlertCircle className="w-4 h-4 text-yellow-600 shrink-0" />
-              <p className="text-xs font-semibold text-yellow-800 uppercase tracking-wider">
-                Duplicate Column Names — Label &amp; Assign
-              </p>
-            </div>
-
-            {/* How-to banner */}
-            <div className="px-4 pt-3 pb-2">
-              <div className="flex items-start gap-2 text-xs text-yellow-800 bg-yellow-100/70 rounded-lg px-3 py-2 mb-3">
-                <span className="font-bold shrink-0">How to use:</span>
-                <span>
-                  Your file has columns with the same name (e.g. <em>Age</em> appears for each product group).
-                  {' '}<strong>Step 1</strong> — Click each badge below to rename it to a short label like <em>GTL</em>, <em>GHS</em>, <em>GMM</em>.
-                  {' '}<strong>Step 2</strong> — In the zones below, drag the labeled chips (e.g. <em>Age [GTL]</em>, <em>Age [GHS]</em>) to the correct role.
-                </span>
-              </div>
-
-              {/* Duplicate groups */}
-              <div className="space-y-2.5">
-                {Object.entries(dupGroups).map(([name, cols]) => (
-                  <div key={name} className="flex items-start flex-wrap gap-1.5">
-                    <span className="text-xs font-semibold text-gray-700 mt-0.5 min-w-[120px]">
-                      {name.length > 28 ? name.slice(0, 28) + '…' : name}
-                      <span className="ml-1 text-yellow-600 font-normal">(×{cols.length})</span>
-                    </span>
-                    <div className="flex flex-wrap gap-1">
-                      {cols.map(col => (
-                        <GroupBadgeEditor
-                          key={col.index}
-                          label={userGroupMap[col.index] || groupMap[col.index] || `#${col.index}`}
-                          onSave={label => setUserGroupMap(prev => ({ ...prev, [col.index]: label }))}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <p className="text-xs text-yellow-600 mt-2.5">
-                💡 After renaming, find the labeled chips in the zones below and drag them to <strong>Compare Fields</strong> to track changes.
-              </p>
-            </div>
-          </div>
+          <DuplicatePanel
+            dupGroups={dupGroups}
+            groupMap={groupMap}
+            userGroupMap={userGroupMap}
+            occurrenceColorMap={occurrenceColorMap}
+            onSaveLabel={(idx, lbl) => setUserGroupMap(prev => ({ ...prev, [idx]: lbl }))}
+          />
         )}
 
         {/* 4 role drop zones */}
@@ -573,20 +721,18 @@ export default function Step3_ColumnMapper({ wizard }) {
                 roleKey={roleKey}
                 info={info}
                 columns={getColsByRole(roleKey)}
-                allColumns={allColumns}
-                roleMap={roleMap}
                 suggestedSet={suggestedSet}
-                displayNameMap={displayNameMap}
                 dupNames={dupNames}
                 groupMap={groupMap}
                 userGroupMap={userGroupMap}
+                occurrenceColorMap={occurrenceColorMap}
                 colSearch={colSearch}
               />
             ))}
           </div>
         )}
 
-        {/* Auto-excluded empty columns panel */}
+        {/* Auto-excluded empty columns */}
         {emptyColNames.length > 0 && (
           <div className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3">
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
@@ -595,13 +741,11 @@ export default function Step3_ColumnMapper({ wizard }) {
             <div className="flex flex-wrap gap-1.5">
               {emptyColNames.map(n => <Badge key={n} variant="gray">{n}</Badge>)}
             </div>
-            <p className="text-xs text-gray-400 mt-1.5">
-              These columns contain no data and are auto-assigned to Ignore.
-            </p>
+            <p className="text-xs text-gray-400 mt-1.5">These columns contain no data and are auto-assigned to Ignore.</p>
           </div>
         )}
 
-        {/* Formula columns panel */}
+        {/* Formula columns */}
         {formulaColNames.length > 0 && (
           <div className="bg-orange-50 border border-orange-200 rounded-xl px-4 py-3">
             <div className="flex items-center gap-2 mb-1.5">
@@ -611,23 +755,16 @@ export default function Step3_ColumnMapper({ wizard }) {
             <div className="flex flex-wrap gap-1.5">
               {formulaColNames.map(n => <Badge key={n} variant="orange">{n}</Badge>)}
             </div>
-            <p className="text-xs text-orange-600 mt-1.5">
-              These columns contain formulas. They're auto-assigned to Display Only.
-            </p>
+            <p className="text-xs text-orange-600 mt-1.5">These columns contain formulas. They're auto-assigned to Display Only.</p>
           </div>
         )}
 
-        {/* File B diff panel */}
+        {/* File B diff */}
         {sheetsB.length > 0 && state.selectedSheets.file_a && state.selectedSheets.file_b && (
-          <FileBDiffPanel
-            sheetsA={sheetsA}
-            sheetsB={sheetsB}
-            selectedA={state.selectedSheets.file_a}
-            selectedB={state.selectedSheets.file_b}
-          />
+          <FileBDiffPanel sheetsA={sheetsA} sheetsB={sheetsB} selectedA={state.selectedSheets.file_a} selectedB={state.selectedSheets.file_b} />
         )}
 
-        {/* Validation alerts */}
+        {/* Alerts */}
         {!canContinue && (
           <Alert variant="warning">
             <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
@@ -650,17 +787,16 @@ export default function Step3_ColumnMapper({ wizard }) {
         </div>
       </div>
 
-      {/* Drag overlay */}
       <DragOverlay dropAnimation={null}>
         {activeCol ? (
           <DragChip
             col={activeCol}
-            displayName={displayNameMap[activeCol.index] || activeCol.name}
             groupLabel={
               dupNames.has(activeCol.name)
-                ? (userGroupMap[activeCol.index] || groupMap[activeCol.index] || `#${activeCol.index}`)
+                ? (userGroupMap[activeCol.index] || groupMap[activeCol.index] || 'Group')
                 : null
             }
+            groupColor={occurrenceColorMap[activeCol.index] || null}
           />
         ) : null}
       </DragOverlay>
