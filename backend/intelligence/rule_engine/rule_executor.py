@@ -14,6 +14,20 @@ from .change_detector import (
 
 def dataframe_to_rows(df: pd.DataFrame) -> List[Dict]:
     """Convert DataFrame to list of dicts with string column names."""
+    # Deduplicate column names before converting to avoid pandas silently
+    # omitting columns — e.g. if _rename_dup_columns couldn't rename them.
+    if df.columns.duplicated().any():
+        seen = {}
+        new_cols = []
+        for col in df.columns:
+            if col in seen:
+                seen[col] += 1
+                new_cols.append(f"{col}__{seen[col]}")
+            else:
+                seen[col] = 0
+                new_cols.append(col)
+        df = df.copy()
+        df.columns = new_cols
     return df.where(pd.notnull(df), None).to_dict(orient='records')
 
 

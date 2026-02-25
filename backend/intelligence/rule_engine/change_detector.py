@@ -1,6 +1,7 @@
 """
 Per-field difference detection with type-aware comparison.
 """
+import math
 import re
 from datetime import datetime, date
 from typing import Any, Dict, List, Optional, Tuple
@@ -10,8 +11,11 @@ def _normalize(val: Any) -> str:
     """Normalize a value to a comparable string."""
     if val is None:
         return ''
-    if isinstance(val, float) and val == int(val):
-        return str(int(val))
+    if isinstance(val, float):
+        if math.isnan(val) or math.isinf(val):
+            return ''
+        if val == int(val):
+            return str(int(val))
     if isinstance(val, (datetime, date)):
         return val.strftime('%Y-%m-%d')
     return str(val).strip()
