@@ -2,8 +2,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   FileOutput, Settings2, Download, Play, Eye, CheckCircle2,
-  AlertCircle, ChevronUp, ChevronDown, X, RefreshCw,
-  Key, GitCompare, EyeOff, Columns, ArrowRight
+  AlertCircle, AlertTriangle, ChevronUp, ChevronDown, ChevronRight, X, RefreshCw,
+  Key, GitCompare, EyeOff, Columns, ArrowRight, Search
 } from 'lucide-react';
 import { processComparison, downloadResult } from '../services/intelApi';
 import { Button, Toggle, Alert, Input, Badge, cn } from '../ui';
@@ -80,8 +80,49 @@ function SummaryBadge({ label, value, color }) {
   );
 }
 
+// ── Column Row (shared by ColumnManager grouped + search views) ───────────────
+function ColRow({ col, idx, colList, onMove, onToggle }) {
+  const srcStyle = SOURCE_STYLES[col.source] || SOURCE_STYLES.Rule;
+  const SrcIcon = srcStyle.icon;
+  return (
+    <div className={cn('flex items-center gap-2 px-4 py-1.5 transition-colors', col.included ? 'bg-white' : 'bg-gray-50 opacity-50')}>
+      <input
+        type="checkbox"
+        checked={col.included}
+        onChange={() => onToggle(idx)}
+        className="w-4 h-4 rounded accent-indigo-500 shrink-0 cursor-pointer"
+      />
+      <div className="flex-1 flex items-center gap-1.5 min-w-0">
+        <SrcIcon className="w-3 h-3 text-gray-400 shrink-0" />
+        <p className="text-xs font-medium text-gray-800 truncate">{col.name}</p>
+      </div>
+      <div className="flex gap-0.5 shrink-0">
+        <button
+          type="button"
+          onClick={() => onMove(idx, -1)}
+          disabled={idx === 0}
+          className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 disabled:opacity-30 disabled:cursor-not-allowed"
+        >
+          <ChevronUp className="w-3 h-3" />
+        </button>
+        <button
+          type="button"
+          onClick={() => onMove(idx, 1)}
+          disabled={idx === colList.length - 1}
+          className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 disabled:opacity-30 disabled:cursor-not-allowed"
+        >
+          <ChevronDown className="w-3 h-3" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── Column Manager ───────────────────────────────────────────────────────────
 function ColumnManager({ colList, onColListChange }) {
+  const [search, setSearch] = useState('');
+  const [collapsedGroups, setCollapsedGroups] = useState({});
+
   const moveCol = (idx, dir) => {
     const next = [...colList];
     const target = idx + dir;
@@ -95,59 +136,212 @@ function ColumnManager({ colList, onColListChange }) {
     onColListChange(next);
   };
 
+  const selectAll = () => onColListChange(colList.map(c => ({ ...c, included: true })));
+  const deselectAll = () => onColListChange(colList.map(c => ({ ...c, included: false })));
+  const toggleGroup = (group) => setCollapsedGroups(prev => ({ ...prev, [group]: !prev[group] }));
+
+  const filteredFlat = search.trim()
+    ? colList.filter(c => c.name.toLowerCase().includes(search.toLowerCase()))
+    : null;
+
+  const grouped = useMemo(() => {
+    const order = ['Key', 'Compare', 'Display', 'Remarks', 'Rule'];
+    const map = {};
+    order.forEach(g => {
+      const cols = colList.filter(c => c.source === g);
+      if (cols.length) map[g] = cols;
+    });
+    return map;
+  }, [colList]);
+
   return (
     <div className="border border-gray-200 rounded-xl overflow-hidden">
       <div className="bg-gray-50 px-4 py-2 border-b border-gray-200 flex items-center justify-between">
         <p className="text-xs font-semibold text-gray-600 uppercase tracking-wider">Output Columns</p>
-        <p className="text-xs text-gray-400">{colList.filter(c => c.included).length} / {colList.length} included</p>
+        <div className="flex items-center gap-2">
+          <p className="text-xs text-gray-400">{colList.filter(c => c.included).length}/{colList.length}</p>
+          <button type="button" onClick={selectAll} className="text-xs text-indigo-500 hover:underline">All</button>
+          <span className="text-gray-300">|</span>
+          <button type="button" onClick={deselectAll} className="text-xs text-gray-400 hover:underline">None</button>
+        </div>
       </div>
-      <div className="divide-y divide-gray-100">
-        {colList.map((col, idx) => {
-          const srcStyle = SOURCE_STYLES[col.source] || SOURCE_STYLES.Rule;
-          const SrcIcon = srcStyle.icon;
-          return (
-            <div key={col.name} className={cn('flex items-center gap-3 px-4 py-2.5 transition-colors', col.included ? 'bg-white' : 'bg-gray-50 opacity-60')}>
-              {/* Include toggle */}
-              <input
-                type="checkbox"
-                checked={col.included}
-                onChange={() => toggleInclude(idx)}
-                className="w-4 h-4 rounded accent-indigo-500 shrink-0 cursor-pointer"
-              />
-              {/* Column name + source */}
-              <div className="flex-1 flex items-center gap-2 min-w-0">
-                <SrcIcon className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-                <p className="text-sm font-medium text-gray-800 truncate">{col.name}</p>
-                <Badge variant={srcStyle.color}>{col.source}</Badge>
-              </div>
-              {/* Reorder buttons */}
-              <div className="flex gap-0.5 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => moveCol(idx, -1)}
-                  disabled={idx === 0}
-                  className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 disabled:opacity-30 disabled:cursor-not-allowed"
-                >
-                  <ChevronUp className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => moveCol(idx, 1)}
-                  disabled={idx === colList.length - 1}
-                  className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 disabled:opacity-30 disabled:cursor-not-allowed"
-                >
-                  <ChevronDown className="w-3.5 h-3.5" />
-                </button>
-              </div>
+
+      {/* Search */}
+      <div className="px-3 py-2 border-b border-gray-100">
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
+          <input
+            type="text"
+            placeholder="Search columns..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="w-full pl-7 pr-3 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:border-indigo-300 bg-white"
+          />
+        </div>
+      </div>
+
+      <div className="max-h-72 overflow-y-auto">
+        {filteredFlat ? (
+          filteredFlat.length === 0 ? (
+            <p className="text-xs text-gray-400 italic text-center py-4">No columns match "{search}".</p>
+          ) : (
+            <div className="divide-y divide-gray-100">
+              {filteredFlat.map(col => (
+                <ColRow key={col.name} col={col} idx={colList.indexOf(col)} colList={colList} onMove={moveCol} onToggle={toggleInclude} />
+              ))}
             </div>
-          );
-        })}
-        {colList.length === 0 && (
-          <p className="text-xs text-gray-400 italic text-center py-4">
-            No columns — configure column mapping in Step 3.
-          </p>
+          )
+        ) : (
+          <div>
+            {Object.entries(grouped).map(([group, cols]) => (
+              <div key={group}>
+                <button
+                  type="button"
+                  onClick={() => toggleGroup(group)}
+                  className="w-full flex items-center justify-between px-4 py-1.5 bg-gray-50 hover:bg-gray-100 transition-colors border-b border-gray-100"
+                >
+                  <span className="text-xs font-semibold text-gray-500">{group}</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs text-gray-400">{cols.length}</span>
+                    {collapsedGroups[group]
+                      ? <ChevronDown className="w-3 h-3 text-gray-400" />
+                      : <ChevronUp className="w-3 h-3 text-gray-400" />}
+                  </div>
+                </button>
+                {!collapsedGroups[group] && (
+                  <div className="divide-y divide-gray-100">
+                    {cols.map(col => (
+                      <ColRow key={col.name} col={col} idx={colList.indexOf(col)} colList={colList} onMove={moveCol} onToggle={toggleInclude} />
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+            {colList.length === 0 && (
+              <p className="text-xs text-gray-400 italic text-center py-4">
+                No columns — configure column mapping in Step 3.
+              </p>
+            )}
+          </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ── Config Summary ───────────────────────────────────────────────────────────
+function ConfigSummary({ state, onEdit }) {
+  const [collapsed, setCollapsed] = useState(false);
+  const { columnMapping, rules, fileA, fileB, selectedSheets } = state;
+  const hasNoKey = !columnMapping.unique_key?.length;
+
+  const ruleCounts = useMemo(() => {
+    const counts = {};
+    (rules || []).forEach(r => {
+      const type = r.rule_type || 'Unknown';
+      counts[type] = (counts[type] || 0) + 1;
+    });
+    return counts;
+  }, [rules]);
+
+  return (
+    <div className="border border-gray-200 rounded-xl overflow-hidden">
+      <button
+        type="button"
+        className="w-full bg-gray-50 px-4 py-2.5 border-b border-gray-200 flex items-center justify-between hover:bg-gray-100 transition-colors"
+        onClick={() => setCollapsed(c => !c)}
+      >
+        <div className="flex items-center gap-2">
+          <Settings2 className="w-4 h-4 text-gray-400" />
+          <span className="text-sm font-semibold text-gray-700">Configuration Summary</span>
+          {hasNoKey && (
+            <span className="flex items-center gap-1 text-xs text-amber-600 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
+              <AlertTriangle className="w-3 h-3" />
+              No key columns
+            </span>
+          )}
+        </div>
+        {collapsed ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronUp className="w-4 h-4 text-gray-400" />}
+      </button>
+
+      <AnimatePresence>
+        {!collapsed && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.18 }}
+            className="overflow-hidden"
+          >
+            <div className="grid grid-cols-2 md:grid-cols-4 divide-y md:divide-y-0 md:divide-x divide-gray-100">
+              {/* Files */}
+              <div className="p-3 space-y-1">
+                <div className="flex items-center justify-between mb-1.5">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Files</p>
+                  <button type="button" onClick={() => onEdit(1)} className="text-xs text-indigo-500 hover:underline flex items-center gap-0.5">
+                    <ChevronRight className="w-3 h-3" />Edit
+                  </button>
+                </div>
+                <p className="text-xs text-gray-700 truncate" title={fileA?.name}>A: {fileA?.name || '—'}</p>
+                <p className="text-xs text-gray-700 truncate" title={fileB?.name}>B: {fileB?.name || '—'}</p>
+              </div>
+
+              {/* Sheets */}
+              <div className="p-3 space-y-1">
+                <div className="flex items-center justify-between mb-1.5">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Sheets</p>
+                  <button type="button" onClick={() => onEdit(2)} className="text-xs text-indigo-500 hover:underline flex items-center gap-0.5">
+                    <ChevronRight className="w-3 h-3" />Edit
+                  </button>
+                </div>
+                <p className="text-xs text-gray-700 truncate">A: {selectedSheets?.file_a || '—'}</p>
+                <p className="text-xs text-gray-700 truncate">B: {selectedSheets?.file_b || '—'}</p>
+              </div>
+
+              {/* Columns */}
+              <div className="p-3 space-y-1">
+                <div className="flex items-center justify-between mb-1.5">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Columns</p>
+                  <button type="button" onClick={() => onEdit(3)} className="text-xs text-indigo-500 hover:underline flex items-center gap-0.5">
+                    <ChevronRight className="w-3 h-3" />Edit
+                  </button>
+                </div>
+                <p className={cn('text-xs', hasNoKey ? 'text-amber-600 font-medium' : 'text-gray-700')}>
+                  {columnMapping.unique_key?.length || 0} Key
+                </p>
+                <p className="text-xs text-gray-700">{columnMapping.compare_fields?.length || 0} Compare</p>
+                <p className="text-xs text-gray-700">{columnMapping.display_fields?.length || 0} Display</p>
+                <p className="text-xs text-gray-700">{columnMapping.ignored_fields?.length || 0} Ignored</p>
+              </div>
+
+              {/* Rules */}
+              <div className="p-3 space-y-1">
+                <div className="flex items-center justify-between mb-1.5">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Rules</p>
+                  <button type="button" onClick={() => onEdit(4)} className="text-xs text-indigo-500 hover:underline flex items-center gap-0.5">
+                    <ChevronRight className="w-3 h-3" />Edit
+                  </button>
+                </div>
+                <p className="text-xs text-gray-700">{rules?.length || 0} total</p>
+                {Object.entries(ruleCounts).map(([type, count]) => (
+                  <p key={type} className="text-xs text-gray-500 truncate">
+                    {type.replace(/_RULE$/, '')} ×{count}
+                  </p>
+                ))}
+              </div>
+            </div>
+
+            {hasNoKey && (
+              <div className="px-4 py-2 bg-amber-50 border-t border-amber-200">
+                <p className="text-xs text-amber-700 flex items-center gap-1">
+                  <AlertTriangle className="w-3 h-3 shrink-0" />
+                  No key columns set — all rows will appear as Additions or Deletions without row matching.
+                </p>
+              </div>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -296,8 +490,9 @@ function RichPreview({ previewData, oc, colList, onClose }) {
     return result;
   }, [rows, oc.add_remarks_column, extraColNames]);
 
+  // Follow user's colList order, only show cols that actually exist in preview data
   const visibleHeaders = includedCols.length > 0
-    ? allPossibleCols.filter(h => includedCols.includes(h))
+    ? includedCols.filter(h => allPossibleCols.includes(h))
     : allPossibleCols;
 
   const getCellValue = (row, header) => {
@@ -450,10 +645,17 @@ export default function Step5_OutputConfig({ wizard }) {
   // Build column list from wizard state; re-compute when returning to this step
   const [colList, setColList] = useState(() => buildColumnList(state));
 
-  // Rebuild if state changes (e.g., navigating back/forward)
+  // Rebuild if state changes (e.g., navigating back/forward); also sync outputConfig
   useEffect(() => {
-    setColList(buildColumnList(state));
-  }, [state.columnMapping, state.rules, state.outputConfig.add_remarks_column]);
+    const newList = buildColumnList(state);
+    setColList(newList);
+    const allCols = newList.map(c => c.name);
+    const included = newList.filter(c => c.included).map(c => c.name);
+    updateOC({
+      included_columns: included.length === allCols.length ? null : included,
+      column_order: allCols,
+    });
+  }, [state.columnMapping, state.rules, state.outputConfig.add_remarks_column]); // eslint-disable-line
 
   // Sync colList changes back into outputConfig
   const handleColListChange = (newList) => {
@@ -525,6 +727,9 @@ export default function Step5_OutputConfig({ wizard }) {
         <h2 className="text-xl font-semibold text-gray-900 mb-1">Output Configuration</h2>
         <p className="text-sm text-gray-500">Configure report settings, column selection, and preview results.</p>
       </div>
+
+      {/* ── Config Summary ── */}
+      <ConfigSummary state={state} onEdit={(step) => update({ step })} />
 
       {/* ── Section 1: Output Settings ── */}
       <section className="space-y-4">
