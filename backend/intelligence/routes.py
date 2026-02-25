@@ -37,6 +37,64 @@ logger = logging.getLogger(__name__)
 
 intel_bp = Blueprint('intel', __name__, url_prefix='/api/intel')
 
+# ── Duplicate-column bracket-name helpers ─────────────────────────────────────
+
+def _compute_dup_group_labels(analysis_columns):
+    """
+    Replicate frontend detectDuplicateGroups logic.
+    Returns (dup_names: set, group_map: {col_index: auto_label}).
+    """
+    name_counts = {}
+    for col in analysis_columns:
+        name_counts[col['name']] = name_counts.get(col['name'], 0) + 1
+    dup_names = {n for n, cnt in name_counts.items() if cnt > 1}
+
+    group_map = {}
+    for name in dup_names:
+        dups = sorted([c for c in analysis_columns if c['name'] == name], key=lambda c: c['index'])
+        for i, col in enumerate(dups):
+            if i == 0:
+                prev_cols = [c for c in analysis_columns
+                             if c['index'] < col['index'] and c['name'] not in dup_names]
+                nearest = prev_cols[-1] if prev_cols else None
+                group_map[col['index']] = nearest['name'] if nearest else f'Group {i + 1}'
+            else:
+                prev = dups[i - 1]
+                between = [c for c in analysis_columns
+                           if prev['index'] < c['index'] < col['index']
+                           and c['name'] not in dup_names]
+                group_map[col['index']] = between[0]['name'] if between else f'Group {i + 1}'
+
+    return dup_names, group_map
+
+
+def _rename_dup_columns(df, analysis_columns):
+    """
+    Rename duplicate pandas columns (e.g. 'Age.1') to bracket-label names
+    ('Age [GroupLabel]') that match the frontend's column_mapping format.
+    Non-duplicate columns are unchanged.
+    """
+    if not analysis_columns:
+        return df
+    dup_names, group_map = _compute_dup_group_labels(analysis_columns)
+    if not dup_names:
+        return df
+
+    new_cols = list(df.columns)
+    for col in analysis_columns:
+        if col['name'] not in dup_names:
+            continue
+        auto_label = group_map.get(col['index'], str(col['index']))
+        bracket_name = f"{col['name']} [{auto_label}]"
+        idx = col['index']
+        if idx < len(new_cols):
+            new_cols[idx] = bracket_name
+
+    df = df.copy()
+    df.columns = new_cols
+    return df
+
+
 # ── In-memory session store ────────────────────────────────────────────────────
 _sessions: Dict[str, Dict] = {}
 _sessions_lock = threading.Lock()
@@ -305,6 +363,18 @@ def process():
         # Strip whitespace from column names to match the stripped names from analysis
         df_a.columns = df_a.columns.map(lambda c: str(c).strip())
         df_b.columns = df_b.columns.map(lambda c: str(c).strip())
+
+        # Rename duplicate columns (e.g. 'Age.1') to bracket-label names ('Age [GroupLabel]')
+        # so they match what the frontend stored in column_mapping.
+        analysis_data = session.get('file_analysis', {})
+        analysis_cols_a = next(
+            (s['columns'] for s in analysis_data.get('file_a', {}).get('sheets', [])
+             if s['name'] == sc.file_a_sheet),
+            []
+        )
+        if analysis_cols_a:
+            df_a = _rename_dup_columns(df_a, analysis_cols_a)
+            df_b = _rename_dup_columns(df_b, analysis_cols_a)  # same structure assumed
 
         result = execute_template(template, df_a, df_b)
     except Exception as e:
