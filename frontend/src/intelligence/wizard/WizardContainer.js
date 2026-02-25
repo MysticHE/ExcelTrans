@@ -16,7 +16,7 @@ const STEPS = [
   { num: 5, label: 'Output' },
 ];
 
-function StepIndicator({ currentStep, onGoTo }) {
+function StepIndicator({ currentStep, maxStep, onGoTo }) {
   const progressPct = Math.round(((currentStep - 1) / (STEPS.length - 1)) * 100);
 
   return (
@@ -33,16 +33,18 @@ function StepIndicator({ currentStep, onGoTo }) {
       <div className="flex items-center">
         {STEPS.map((step, i) => {
           const isDone    = step.num < currentStep;
+          const isVisited = step.num <= maxStep && step.num !== currentStep;
           const isCurrent = step.num === currentStep;
+          const canClick  = isDone || isVisited;
           return (
             <React.Fragment key={step.num}>
               <button
-                onClick={() => isDone && onGoTo(step.num)}
-                disabled={!isDone}
+                onClick={() => canClick && onGoTo(step.num)}
+                disabled={!canClick}
                 title={step.label}
                 className={cn(
                   'flex flex-col items-center group focus:outline-none shrink-0',
-                  isDone ? 'cursor-pointer' : 'cursor-default'
+                  canClick ? 'cursor-pointer' : 'cursor-default'
                 )}
               >
                 <div
@@ -53,10 +55,12 @@ function StepIndicator({ currentStep, onGoTo }) {
                       ? 'bg-indigo-500 text-white shadow-md shadow-indigo-200 group-hover:bg-indigo-600'
                       : isCurrent
                         ? 'bg-indigo-500 text-white shadow-md shadow-indigo-200'
-                        : 'bg-white text-gray-400 border-2 border-dashed border-gray-300'
+                        : isVisited
+                          ? 'bg-indigo-200 text-indigo-700 group-hover:bg-indigo-300'
+                          : 'bg-white text-gray-400 border-2 border-dashed border-gray-300'
                   )}
                 >
-                  {isDone ? <CheckCircle2 className="w-4 h-4" /> : <span>{step.num}</span>}
+                  {isDone ? <CheckCircle2 className="w-4 h-4" /> : isVisited ? <CheckCircle2 className="w-4 h-4" /> : <span>{step.num}</span>}
                 </div>
                 <span
                   className={cn(
@@ -92,7 +96,7 @@ export default function WizardContainer({ wizard, aiConfig }) {
 
   return (
     <div>
-      <StepIndicator currentStep={state.step} onGoTo={goToStep} />
+      <StepIndicator currentStep={state.step} maxStep={state.maxStep || state.step} onGoTo={goToStep} />
 
       {/* Wizard card */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">

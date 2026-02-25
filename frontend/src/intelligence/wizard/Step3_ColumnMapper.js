@@ -69,81 +69,104 @@ function parseBracketName(savedName) {
   return m ? { baseName: m[1], groupLabel: m[2] } : null;
 }
 
+// Shared helper: for each duplicate baseName, collect saved bracket entries in
+// role-processing order and match them to column indices — first by exact
+// auto-label, then by position order as fallback (handles custom-renamed labels).
+function _matchDupsByPosition(cols, mapping, groupMap, callback) {
+  const nameCounts = {};
+  cols.forEach(c => { nameCounts[c.name] = (nameCounts[c.name] || 0) + 1; });
+  const dupNameSet = new Set(Object.keys(nameCounts).filter(n => nameCounts[n] > 1));
+
+  // Collect bracket entries per baseName in stable order (same order handleContinue writes them)
+  const ROLE_ORDER = ['unique_key', 'compare_fields', 'display_fields', 'ignored_fields'];
+  const dupByBase = {}; // baseName → [{role, groupLabel}]
+  ROLE_ORDER.forEach(role => {
+    (mapping[role] || []).forEach(savedName => {
+      const parsed = parseBracketName(savedName);
+      if (parsed && dupNameSet.has(parsed.baseName)) {
+        (dupByBase[parsed.baseName] = dupByBase[parsed.baseName] || []).push({ role, groupLabel: parsed.groupLabel });
+      }
+    });
+  });
+
+  Object.entries(dupByBase).forEach(([baseName, assignments]) => {
+    const dupCols = cols
+      .filter(c => c.name === baseName && !STRUCTURAL_ROLES[c.detected_type])
+      .sort((a, b) => a.index - b.index);
+
+    // Pass 1: exact auto-label match
+    const usedIdx = new Set();
+    const unmatched = [];
+    assignments.forEach(({ role, groupLabel }) => {
+      const col = dupCols.find(c => !usedIdx.has(c.index) && String(groupMap[c.index] ?? c.index) === groupLabel);
+      if (col) { usedIdx.add(col.index); callback(col, role, groupLabel, true); }
+      else { unmatched.push({ role, groupLabel }); }
+    });
+
+    // Pass 2: positional fallback for unmatched (custom-renamed labels)
+    const leftCols = dupCols.filter(c => !usedIdx.has(c.index));
+    unmatched.forEach(({ role, groupLabel }, i) => {
+      if (i < leftCols.length) callback(leftCols[i], role, groupLabel, false);
+    });
+  });
+}
+
 function buildInitialRoleMap(cols, mapping, groupMap = {}) {
   const map = {};
   cols.forEach(col => { map[col.index] = getSmartDefault(col); });
-  const applyMapping = (names, role) => {
-    if (!names?.length) return;
-    names.forEach(savedName => {
-      const parsed = parseBracketName(savedName);
-      if (parsed) {
-        // Duplicate column: match by base name + auto group label
-        cols.forEach(col => {
-          if (STRUCTURAL_ROLES[col.detected_type]) return;
-          if (col.name !== parsed.baseName) return;
-          const autoLabel = String(groupMap[col.index] ?? col.index);
-          if (autoLabel === parsed.groupLabel) map[col.index] = role;
-        });
-      } else {
-        // Plain column name
-        cols.forEach(col => {
-          if (STRUCTURAL_ROLES[col.detected_type]) return;
-          if (col.name === savedName) map[col.index] = role;
-        });
-      }
+
+  // Plain (non-duplicate) names
+  const ROLE_ORDER = ['unique_key', 'compare_fields', 'display_fields', 'ignored_fields'];
+  const nameCounts = {};
+  cols.forEach(c => { nameCounts[c.name] = (nameCounts[c.name] || 0) + 1; });
+  const dupNameSet = new Set(Object.keys(nameCounts).filter(n => nameCounts[n] > 1));
+  ROLE_ORDER.forEach(role => {
+    (mapping[role] || []).forEach(savedName => {
+      if (parseBracketName(savedName)) return; // handled by _matchDupsByPosition
+      cols.forEach(col => {
+        if (!STRUCTURAL_ROLES[col.detected_type] && col.name === savedName && !dupNameSet.has(col.name)) {
+          map[col.index] = role;
+        }
+      });
     });
-  };
-  applyMapping(mapping.unique_key, 'unique_key');
-  applyMapping(mapping.compare_fields, 'compare_fields');
-  applyMapping(mapping.display_fields, 'display_fields');
-  applyMapping(mapping.ignored_fields, 'ignored_fields');
+  });
+
+  // Duplicate bracket names — exact then positional fallback
+  _matchDupsByPosition(cols, mapping, groupMap, (col, role) => { map[col.index] = role; });
+
   return map;
 }
 
 /** Restore user-customized group labels from saved bracket names */
 function buildRestoredUserGroupMap(cols, mapping, groupMap = {}) {
   const restoredMap = {};
-  const allNames = [
-    ...(mapping.unique_key || []),
-    ...(mapping.compare_fields || []),
-    ...(mapping.display_fields || []),
-    ...(mapping.ignored_fields || []),
-  ];
-  allNames.forEach(savedName => {
-    const parsed = parseBracketName(savedName);
-    if (!parsed) return;
-    cols.forEach(col => {
-      if (col.name !== parsed.baseName) return;
-      const autoLabel = String(groupMap[col.index] ?? col.index);
-      // Only restore if user gave a custom label (differs from auto)
-      if (autoLabel !== parsed.groupLabel) {
-        restoredMap[col.index] = parsed.groupLabel;
-      }
-    });
+  _matchDupsByPosition(cols, mapping, groupMap, (col, _role, groupLabel, exactMatch) => {
+    // Only store label if it differs from the auto-label (i.e., user customized it)
+    const autoLabel = String(groupMap[col.index] ?? col.index);
+    if (!exactMatch || groupLabel !== autoLabel) {
+      restoredMap[col.index] = groupLabel;
+    }
   });
   return restoredMap;
 }
 
 function computeSuggested(cols, mapping, groupMap = {}) {
   const assignedIndices = new Set();
-  const allNames = [
-    ...(mapping.unique_key || []),
-    ...(mapping.compare_fields || []),
-    ...(mapping.display_fields || []),
-    ...(mapping.ignored_fields || []),
-  ];
-  allNames.forEach(savedName => {
-    const parsed = parseBracketName(savedName);
-    if (parsed) {
-      cols.forEach(col => {
-        if (col.name !== parsed.baseName) return;
-        const autoLabel = String(groupMap[col.index] ?? col.index);
-        if (autoLabel === parsed.groupLabel) assignedIndices.add(col.index);
-      });
-    } else {
-      cols.forEach(col => { if (col.name === savedName) assignedIndices.add(col.index); });
-    }
+
+  // Plain names
+  const nameCounts = {};
+  cols.forEach(c => { nameCounts[c.name] = (nameCounts[c.name] || 0) + 1; });
+  const dupNameSet = new Set(Object.keys(nameCounts).filter(n => nameCounts[n] > 1));
+  ['unique_key', 'compare_fields', 'display_fields', 'ignored_fields'].forEach(role => {
+    (mapping[role] || []).forEach(savedName => {
+      if (parseBracketName(savedName)) return;
+      cols.forEach(col => { if (col.name === savedName && !dupNameSet.has(col.name)) assignedIndices.add(col.index); });
+    });
   });
+
+  // Duplicate bracket names — exact then positional fallback
+  _matchDupsByPosition(cols, mapping, groupMap, (col) => assignedIndices.add(col.index));
+
   const suggested = new Set();
   cols.forEach(col => { if (!assignedIndices.has(col.index)) suggested.add(col.index); });
   return suggested;
@@ -727,6 +750,7 @@ export default function Step3_ColumnMapper({ wizard }) {
         formula_fields: state.columnMapping.formula_fields || {},
       },
       step: 4,
+      maxStep: Math.max(state.maxStep || 1, 4),
     });
   };
 

@@ -4,6 +4,7 @@ const STORAGE_KEY = 'intel_wizard_state';
 
 const INITIAL_STATE = {
   step: 1,
+  maxStep: 1,
   sessionId: null,
   fileA: null,
   fileB: null,
@@ -57,8 +58,8 @@ export function useWizardState() {
   }, []);
 
   const goToStep = useCallback((step) => {
-    update({ step });
-  }, [update]);
+    update({ step, maxStep: Math.max(state.maxStep || 1, step) });
+  }, [update, state.maxStep]);
 
   const buildTemplate = useCallback(() => {
     const { templateName, selectedSheets, columnMapping, rules, outputConfig, analysis } = state;
