@@ -167,6 +167,7 @@ class OutputConfig:
     add_remarks_column: bool = True
     include_summary_sheet: bool = True
     highlight_changed_cells: bool = True
+    include_unmatched_rows: bool = True  # If False, omit additions/deletions with no matching rule
     output_filename_template: str = 'comparison_{date}'
     output_sheet_name: str = 'Comparison'
     included_columns: Optional[List[str]] = None  # None = all columns
@@ -177,6 +178,7 @@ class OutputConfig:
             'add_remarks_column': self.add_remarks_column,
             'include_summary_sheet': self.include_summary_sheet,
             'highlight_changed_cells': self.highlight_changed_cells,
+            'include_unmatched_rows': self.include_unmatched_rows,
             'output_filename_template': self.output_filename_template,
             'output_sheet_name': self.output_sheet_name,
             'included_columns': self.included_columns,
@@ -225,6 +227,7 @@ class ComparisonTemplate:
                 add_remarks_column=oc.get('add_remarks_column', True),
                 include_summary_sheet=oc.get('include_summary_sheet', True),
                 highlight_changed_cells=oc.get('highlight_changed_cells', True),
+                include_unmatched_rows=oc.get('include_unmatched_rows', True),
                 output_filename_template=oc.get('output_filename_template', 'comparison_{date}'),
                 output_sheet_name=oc.get('output_sheet_name', 'Comparison'),
                 included_columns=oc.get('included_columns'),

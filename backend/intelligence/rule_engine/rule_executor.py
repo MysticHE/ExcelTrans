@@ -61,10 +61,15 @@ def execute_template(template: ComparisonTemplate,
 
     result_rows = []
 
+    include_unmatched = template.output_config.include_unmatched_rows
+
     # --- Process rows only in B (additions) ---
     for j in only_b:
         row_b = rows_b[j]
         output_cols = _compute_output_columns('addition', None, row_b, template.rules, compare_fields)
+        # Skip if no rule fired and user opted out of unmatched rows
+        if not output_cols and not include_unmatched:
+            continue
         if 'Remarks' not in output_cols:
             output_cols['Remarks'] = {'label': 'Addition', 'color': '#C6EFCE'}
         rem = output_cols.get('Remarks', {})
@@ -82,6 +87,9 @@ def execute_template(template: ComparisonTemplate,
     for i in only_a:
         row_a = rows_a[i]
         output_cols = _compute_output_columns('deletion', row_a, None, template.rules, compare_fields)
+        # Skip if no rule fired and user opted out of unmatched rows
+        if not output_cols and not include_unmatched:
+            continue
         if 'Remarks' not in output_cols:
             output_cols['Remarks'] = {'label': 'Deletion', 'color': '#FFC7CE'}
         rem = output_cols.get('Remarks', {})

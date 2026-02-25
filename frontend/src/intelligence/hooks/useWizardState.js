@@ -15,6 +15,7 @@ const INITIAL_STATE = {
     add_remarks_column: true,
     include_summary_sheet: true,
     highlight_changed_cells: true,
+    include_unmatched_rows: true,
     output_filename_template: 'comparison_{date}',
     output_sheet_name: 'Comparison',
     included_columns: null,

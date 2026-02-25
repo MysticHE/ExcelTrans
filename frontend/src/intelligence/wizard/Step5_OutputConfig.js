@@ -785,6 +785,12 @@ export default function Step5_OutputConfig({ wizard }) {
             onChange={(v) => updateOC({ add_remarks_column: v })}
           />
           <Toggle
+            label="Include Unmatched Rows (Additions & Deletions)"
+            desc="Show rows found only in one file, even when no Presence rule is configured"
+            value={oc.include_unmatched_rows ?? true}
+            onChange={(v) => updateOC({ include_unmatched_rows: v })}
+          />
+          <Toggle
             label="Include Summary Sheet"
             desc="Add a Summary tab with counts of additions, deletions, changes"
             value={oc.include_summary_sheet}

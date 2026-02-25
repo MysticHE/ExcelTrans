@@ -63,15 +63,34 @@ function getSmartDefault(col) {
 // Structural types always win — never overridden by saved state
 const STRUCTURAL_ROLES = { empty: 'ignored_fields', formula: 'display_fields' };
 
-function buildInitialRoleMap(cols, mapping) {
+/** Parse "ColName [GroupLabel]" → { baseName, groupLabel } or null */
+function parseBracketName(savedName) {
+  const m = savedName.match(/^(.+?)\s*\[(.+)\]$/);
+  return m ? { baseName: m[1], groupLabel: m[2] } : null;
+}
+
+function buildInitialRoleMap(cols, mapping, groupMap = {}) {
   const map = {};
   cols.forEach(col => { map[col.index] = getSmartDefault(col); });
   const applyMapping = (names, role) => {
     if (!names?.length) return;
-    const nameSet = new Set(names);
-    cols.forEach(col => {
-      if (STRUCTURAL_ROLES[col.detected_type]) return;
-      if (nameSet.has(col.name)) map[col.index] = role;
+    names.forEach(savedName => {
+      const parsed = parseBracketName(savedName);
+      if (parsed) {
+        // Duplicate column: match by base name + auto group label
+        cols.forEach(col => {
+          if (STRUCTURAL_ROLES[col.detected_type]) return;
+          if (col.name !== parsed.baseName) return;
+          const autoLabel = String(groupMap[col.index] ?? col.index);
+          if (autoLabel === parsed.groupLabel) map[col.index] = role;
+        });
+      } else {
+        // Plain column name
+        cols.forEach(col => {
+          if (STRUCTURAL_ROLES[col.detected_type]) return;
+          if (col.name === savedName) map[col.index] = role;
+        });
+      }
     });
   };
   applyMapping(mapping.unique_key, 'unique_key');
@@ -81,15 +100,52 @@ function buildInitialRoleMap(cols, mapping) {
   return map;
 }
 
-function computeSuggested(cols, mapping) {
-  const explicitCols = new Set([
+/** Restore user-customized group labels from saved bracket names */
+function buildRestoredUserGroupMap(cols, mapping, groupMap = {}) {
+  const restoredMap = {};
+  const allNames = [
     ...(mapping.unique_key || []),
     ...(mapping.compare_fields || []),
     ...(mapping.display_fields || []),
     ...(mapping.ignored_fields || []),
-  ]);
+  ];
+  allNames.forEach(savedName => {
+    const parsed = parseBracketName(savedName);
+    if (!parsed) return;
+    cols.forEach(col => {
+      if (col.name !== parsed.baseName) return;
+      const autoLabel = String(groupMap[col.index] ?? col.index);
+      // Only restore if user gave a custom label (differs from auto)
+      if (autoLabel !== parsed.groupLabel) {
+        restoredMap[col.index] = parsed.groupLabel;
+      }
+    });
+  });
+  return restoredMap;
+}
+
+function computeSuggested(cols, mapping, groupMap = {}) {
+  const assignedIndices = new Set();
+  const allNames = [
+    ...(mapping.unique_key || []),
+    ...(mapping.compare_fields || []),
+    ...(mapping.display_fields || []),
+    ...(mapping.ignored_fields || []),
+  ];
+  allNames.forEach(savedName => {
+    const parsed = parseBracketName(savedName);
+    if (parsed) {
+      cols.forEach(col => {
+        if (col.name !== parsed.baseName) return;
+        const autoLabel = String(groupMap[col.index] ?? col.index);
+        if (autoLabel === parsed.groupLabel) assignedIndices.add(col.index);
+      });
+    } else {
+      cols.forEach(col => { if (col.name === savedName) assignedIndices.add(col.index); });
+    }
+  });
   const suggested = new Set();
-  cols.forEach(col => { if (!explicitCols.has(col.name)) suggested.add(col.index); });
+  cols.forEach(col => { if (!assignedIndices.has(col.index)) suggested.add(col.index); });
   return suggested;
 }
 
@@ -573,9 +629,18 @@ export default function Step3_ColumnMapper({ wizard }) {
   const formulaColNames = allColumns.filter(c => c.detected_type === 'formula').map(c => c.name);
   const emptyColNames   = allColumns.filter(c => c.detected_type === 'empty').map(c => c.name);
 
-  const [roleMap, setRoleMap]         = useState(() => buildInitialRoleMap(allColumns, state.columnMapping));
-  const [suggestedSet, setSuggestedSet] = useState(() => computeSuggested(allColumns, state.columnMapping));
-  const [userGroupMap, setUserGroupMap] = useState({});
+  const [roleMap, setRoleMap]         = useState(() => {
+    const { groupMap: gm } = detectDuplicateGroups(allColumns);
+    return buildInitialRoleMap(allColumns, state.columnMapping, gm);
+  });
+  const [suggestedSet, setSuggestedSet] = useState(() => {
+    const { groupMap: gm } = detectDuplicateGroups(allColumns);
+    return computeSuggested(allColumns, state.columnMapping, gm);
+  });
+  const [userGroupMap, setUserGroupMap] = useState(() => {
+    const { groupMap: gm } = detectDuplicateGroups(allColumns);
+    return buildRestoredUserGroupMap(allColumns, state.columnMapping, gm);
+  });
   const [activeId, setActiveId]         = useState(null);
   const [colSearch, setColSearch]       = useState('');
 
@@ -599,15 +664,16 @@ export default function Step3_ColumnMapper({ wizard }) {
     return groups;
   }, [dupNames, allColumns]);
 
-  // Reset when sheet changes
+  // Reset when sheet changes (also restores saved roles and group labels)
   useEffect(() => {
     if (allColumns.length === 0) return;
-    setRoleMap(buildInitialRoleMap(allColumns, state.columnMapping));
-    setSuggestedSet(computeSuggested(allColumns, state.columnMapping));
-    setUserGroupMap({});
+    const { groupMap: gm } = detectDuplicateGroups(allColumns);
+    setRoleMap(buildInitialRoleMap(allColumns, state.columnMapping, gm));
+    setSuggestedSet(computeSuggested(allColumns, state.columnMapping, gm));
+    setUserGroupMap(buildRestoredUserGroupMap(allColumns, state.columnMapping, gm));
     setColSearch('');
     setActiveId(null);
-  }, [selectedSheet?.name]);
+  }, [selectedSheet?.name]); // eslint-disable-line
 
   const handleRoleChange = (colIndex, newRole) => {
     setRoleMap(prev => ({ ...prev, [colIndex]: newRole }));
