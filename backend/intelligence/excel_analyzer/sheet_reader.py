@@ -27,7 +27,7 @@ def read_sheet_dual_pass(filepath: str) -> Dict[str, Any]:
         v_row_iter = v_ws.iter_rows() if v_ws is not None else None
         for row_idx, f_row in enumerate(f_ws.iter_rows(), start=1):
             v_row = next(v_row_iter) if v_row_iter is not None else None
-            v_vals = {vc.column: vc.value for vc in v_row} if v_row else {}
+            v_vals = {vc.column: vc.value for vc in v_row if hasattr(vc, 'column') and vc.column is not None} if v_row else {}
 
             row_data = []
             for cell in f_row:
