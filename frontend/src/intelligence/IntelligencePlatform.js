@@ -150,9 +150,9 @@ function AISettingsPanel({ aiConfig, onSave, onClose }) {
 }
 
 const DEFAULT_AI_CONFIG = {
-  provider: 'anthropic',
+  provider: sessionStorage.getItem('intel_ai_provider') || 'anthropic',
   apiKey: sessionStorage.getItem('intel_ai_key') || '',
-  model: 'claude-haiku-4-5-20251001',
+  model: sessionStorage.getItem('intel_ai_model') || 'claude-haiku-4-5-20251001',
 };
 
 export default function IntelligencePlatform() {
@@ -164,8 +164,15 @@ export default function IntelligencePlatform() {
 
   const handleSaveAIConfig = (config) => {
     setAIConfig(config);
-    if (config.apiKey) sessionStorage.setItem('intel_ai_key', config.apiKey);
-    else sessionStorage.removeItem('intel_ai_key');
+    if (config.apiKey) {
+      sessionStorage.setItem('intel_ai_key', config.apiKey);
+      sessionStorage.setItem('intel_ai_provider', config.provider);
+      sessionStorage.setItem('intel_ai_model', config.model);
+    } else {
+      sessionStorage.removeItem('intel_ai_key');
+      sessionStorage.removeItem('intel_ai_provider');
+      sessionStorage.removeItem('intel_ai_model');
+    }
   };
 
   const handleApplyTemplate = (tmpl) => {
