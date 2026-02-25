@@ -41,14 +41,18 @@ function getSmartDefault(col) {
   return 'display_fields';
 }
 
+// Structural types that always win regardless of saved state
+const STRUCTURAL_ROLES = { empty: 'ignored_fields', formula: 'display_fields' };
+
 function buildInitialRoleMap(cols, mapping) {
   const map = {};
   cols.forEach(col => { map[col.index] = getSmartDefault(col); });
-  // Apply explicit mapping by matching name, with index as tiebreaker
+  // Apply explicit mapping — but structural types (empty/formula) always keep their smart default
   const applyMapping = (names, role) => {
     if (!names?.length) return;
     const nameSet = new Set(names);
     cols.forEach(col => {
+      if (STRUCTURAL_ROLES[col.detected_type]) return; // never override structural
       if (nameSet.has(col.name)) map[col.index] = role;
     });
   };
@@ -511,31 +515,50 @@ export default function Step3_ColumnMapper({ wizard }) {
 
         {/* Duplicate column detection panel */}
         {hasDuplicates && (
-          <div className="bg-yellow-50 border border-yellow-200 rounded-xl px-4 py-3">
-            <div className="flex items-center gap-2 mb-2">
-              <AlertCircle className="w-3.5 h-3.5 text-yellow-600 shrink-0" />
+          <div className="bg-yellow-50 border border-yellow-200 rounded-xl overflow-hidden">
+            {/* Header */}
+            <div className="flex items-center gap-2 px-4 py-2.5 bg-yellow-100/60 border-b border-yellow-200">
+              <AlertCircle className="w-4 h-4 text-yellow-600 shrink-0" />
               <p className="text-xs font-semibold text-yellow-800 uppercase tracking-wider">
-                Duplicate Column Names Detected
+                Duplicate Column Names — Label &amp; Assign
               </p>
             </div>
-            <div className="space-y-2">
-              {Object.entries(dupGroups).map(([name, cols]) => (
-                <div key={name} className="flex items-center flex-wrap gap-1.5">
-                  <span className="text-xs font-medium text-gray-700">{name}</span>
-                  <span className="text-xs text-gray-400">(×{cols.length})</span>
-                  {cols.map(col => (
-                    <GroupBadgeEditor
-                      key={col.index}
-                      label={userGroupMap[col.index] || groupMap[col.index] || `#${col.index}`}
-                      onSave={label => setUserGroupMap(prev => ({ ...prev, [col.index]: label }))}
-                    />
-                  ))}
-                </div>
-              ))}
+
+            {/* How-to banner */}
+            <div className="px-4 pt-3 pb-2">
+              <div className="flex items-start gap-2 text-xs text-yellow-800 bg-yellow-100/70 rounded-lg px-3 py-2 mb-3">
+                <span className="font-bold shrink-0">How to use:</span>
+                <span>
+                  Your file has columns with the same name (e.g. <em>Age</em> appears for each product group).
+                  {' '}<strong>Step 1</strong> — Click each badge below to rename it to a short label like <em>GTL</em>, <em>GHS</em>, <em>GMM</em>.
+                  {' '}<strong>Step 2</strong> — In the zones below, drag the labeled chips (e.g. <em>Age [GTL]</em>, <em>Age [GHS]</em>) to the correct role.
+                </span>
+              </div>
+
+              {/* Duplicate groups */}
+              <div className="space-y-2.5">
+                {Object.entries(dupGroups).map(([name, cols]) => (
+                  <div key={name} className="flex items-start flex-wrap gap-1.5">
+                    <span className="text-xs font-semibold text-gray-700 mt-0.5 min-w-[120px]">
+                      {name.length > 28 ? name.slice(0, 28) + '…' : name}
+                      <span className="ml-1 text-yellow-600 font-normal">(×{cols.length})</span>
+                    </span>
+                    <div className="flex flex-wrap gap-1">
+                      {cols.map(col => (
+                        <GroupBadgeEditor
+                          key={col.index}
+                          label={userGroupMap[col.index] || groupMap[col.index] || `#${col.index}`}
+                          onSave={label => setUserGroupMap(prev => ({ ...prev, [col.index]: label }))}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs text-yellow-600 mt-2.5">
+                💡 After renaming, find the labeled chips in the zones below and drag them to <strong>Compare Fields</strong> to track changes.
+              </p>
             </div>
-            <p className="text-xs text-yellow-600 mt-2">
-              Click a group badge to rename it. Labels appear on column chips to distinguish duplicates.
-            </p>
           </div>
         )}
 
