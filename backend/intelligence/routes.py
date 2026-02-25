@@ -302,6 +302,9 @@ def process():
         sc = template.sheet_config
         df_a = pd.read_excel(path_a, sheet_name=sc.file_a_sheet, header=sc.header_row)
         df_b = pd.read_excel(path_b, sheet_name=sc.file_b_sheet or sc.file_a_sheet, header=sc.header_row)
+        # Strip whitespace from column names to match the stripped names from analysis
+        df_a.columns = df_a.columns.map(lambda c: str(c).strip())
+        df_b.columns = df_b.columns.map(lambda c: str(c).strip())
 
         result = execute_template(template, df_a, df_b)
     except Exception as e:

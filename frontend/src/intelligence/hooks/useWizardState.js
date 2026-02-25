@@ -60,13 +60,18 @@ export function useWizardState() {
   }, [update]);
 
   const buildTemplate = useCallback(() => {
-    const { templateName, selectedSheets, columnMapping, rules, outputConfig } = state;
+    const { templateName, selectedSheets, columnMapping, rules, outputConfig, analysis } = state;
+    const sheetA = selectedSheets.file_a || 'Sheet1';
+    const sheetB = selectedSheets.file_b || sheetA;
+    // Use the header row detected during analysis — NOT hardcoded 0
+    const sheetInfoA = analysis?.file_a?.sheets?.find(s => s.name === sheetA);
+    const headerRow = sheetInfoA?.header_row ?? 0;
     return {
       template_name: templateName,
       sheet_config: {
-        file_a_sheet: selectedSheets.file_a || 'Sheet1',
-        file_b_sheet: selectedSheets.file_b || selectedSheets.file_a || 'Sheet1',
-        header_row: 0,
+        file_a_sheet: sheetA,
+        file_b_sheet: sheetB,
+        header_row: headerRow,
       },
       column_mapping: columnMapping,
       rules,
