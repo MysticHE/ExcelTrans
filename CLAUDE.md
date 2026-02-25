@@ -7,6 +7,8 @@ A two-file Excel comparison tool. Users upload old (File A) and new (File B) Exc
 - **Backend**: Python Flask · port 5000 · `backend/`
 - **Frontend**: React 18 + CRA · port 3000 · `frontend/`
 - **No git worktrees** — single `master` branch on GitHub: `MysticHE/ExcelTrans`
+- **Deployed on Render**: backend `exceltrans-backend`, frontend `exceltrans-frontend` (static)
+  - Frontend requires `REACT_APP_API_URL` env var set in Render dashboard → backend URL
 
 ## Start Commands
 ```bash
@@ -24,12 +26,16 @@ backend/
   extensions.py                                 — Rate limiter setup
   intelligence/
     routes.py                                   — All /api/intel/* endpoints
+                                                  _rename_dup_columns() uses column_mapping
+                                                  to prefer user bracket names over auto-labels
     rule_engine/
       rule_schema.py                            — ComparisonTemplate, Rule, OutputConfig dataclasses
       rule_executor.py                          — Multi-column rule evaluation engine
+                                                  dataframe_to_rows() deduplicates cols before to_dict()
       rule_validator.py                         — Template validation
-      row_matcher.py                            — Exact / fuzzy row matching
+      row_matcher.py                            — Exact / fuzzy row matching (fuzzy capped at 2000 rows)
       change_detector.py                        — Field diff + condition evaluation
+                                                  _normalize() guards float NaN/Inf before int()
     output_builder/
       report_generator.py                       — Excel report writer (openpyxl)
     excel_analyzer/                             — Sheet reading + column classification
@@ -40,12 +46,18 @@ frontend/src/intelligence/
   IntelligencePlatform.js                       — App shell, toolbar, AI settings modal
   ui/index.js                                   — Shared primitives: cn Button Card Badge Input Textarea Toggle Modal Spinner Alert
   hooks/useWizardState.js                       — All wizard state + buildTemplate()
+                                                  Tracks maxStep for forward navigation to visited steps
   services/intelApi.js                          — Fetch wrappers for all API calls
   wizard/
     WizardContainer.js                          — Animated stepper
+                                                  StepIndicator allows clicking any step ≤ maxStep
     Step1_Upload.js                             — File dropzone
     Step2_SheetSelector.js                      — Sheet picker + column preview + mismatch panel
+                                                  Changing file_a sheet resets columnMapping+rules+outputConfig
     Step3_ColumnMapper.js                       — Column role assignment + smart defaults
+                                                  buildInitialRoleMap/buildRestoredUserGroupMap/computeSuggested
+                                                  all use _matchDupsByPosition() for positional fallback
+                                                  when user has custom group labels (not just auto-labels)
     Step4_RuleBuilder.js                        — Rule cards + output column + reorder
     Step5_OutputConfig.js                       — Output settings + column manager + rich preview
   ai/
@@ -59,7 +71,8 @@ frontend/src/intelligence/
 ```javascript
 {
   step: 1-5,
-  sessionId: string,            // from /api/intel/analyze
+  maxStep: 1-5,         // highest step ever reached — enables forward nav to visited steps
+  sessionId: string,    // from /api/intel/analyze
   fileA / fileB: File,
   analysis: { file_a: {...}, file_b: {...} },  // from backend
   selectedSheets: { file_a: string, file_b: string },
@@ -79,6 +92,7 @@ frontend/src/intelligence/
     add_remarks_column: bool,
     include_summary_sheet: bool,
     highlight_changed_cells: bool,
+    include_unmatched_rows: bool,
     output_filename_template: string,  // supports {date} {file_a} {file_b}
     output_sheet_name: string,
     included_columns: string[]|null,   // null = all columns
@@ -86,6 +100,13 @@ frontend/src/intelligence/
   },
 }
 ```
+
+## Duplicate Column Handling
+Columns with the same name get bracket labels (e.g. `"Age [GTL Category]"`). Users can rename these labels in Step 3's DuplicatePanel.
+
+- **Frontend storage**: bracket names stored in `columnMapping` arrays use the user's custom label (e.g. `"Age [GTL]"` after renaming from `"Age [GTL Category]"`)
+- **Backend renaming** (`_rename_dup_columns` in `routes.py`): prefers user bracket names from `column_mapping` over auto-generated labels so DataFrame column names match what the frontend stored
+- **Step 3 restore** (`_matchDupsByPosition` in `Step3_ColumnMapper.js`): exact auto-label match first, then positional fallback — handles custom-renamed labels that would otherwise never match
 
 ## Backend Row Result Schema
 Each row in `result['rows']` has:
@@ -138,3 +159,9 @@ Each row in `result['rows']` has:
 | POST | `/api/intel/ai/nl-to-rule` | NL → rule card |
 | POST | `/api/intel/ai/chat` | Contextual AI chat |
 | POST | `/api/intel/ai/test` | Validate API key |
+
+## Known Gotchas
+- `"Failed to fetch"` at upload stage on Render = worker OOM or timeout from large files loaded twice by dual-pass reader (`read_sheet_dual_pass` loads ALL sheets, both formula and value pass)
+- `cannot convert float NaN to integer` = NaN cell value reaching `_normalize()` in `change_detector.py` — guarded with `math.isnan()` check
+- `DataFrame columns are not unique` warning = duplicate columns not renamed before `to_dict()` — `dataframe_to_rows()` deduplicates as safety net
+- Step 2 sheet change resets Step 3+4 state intentionally — shows warning Alert if mapping already configured
