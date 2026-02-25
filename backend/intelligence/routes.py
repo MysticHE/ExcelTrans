@@ -68,11 +68,13 @@ def _compute_dup_group_labels(analysis_columns):
     return dup_names, group_map
 
 
-def _rename_dup_columns(df, analysis_columns):
+def _rename_dup_columns(df, analysis_columns, column_mapping=None):
     """
     Rename duplicate pandas columns (e.g. 'Age.1') to bracket-label names
     ('Age [GroupLabel]') that match the frontend's column_mapping format.
     Non-duplicate columns are unchanged.
+    If column_mapping is provided, prefer the user's custom bracket names over
+    auto-generated ones so they match what Step3 stored.
     """
     if not analysis_columns:
         return df
@@ -80,15 +82,36 @@ def _rename_dup_columns(df, analysis_columns):
     if not dup_names:
         return df
 
+    # Build position → user bracket name from the template's column_mapping
+    position_to_name = {}
+    if column_mapping:
+        all_user_names = (
+            list(column_mapping.get('unique_key', [])) +
+            list(column_mapping.get('compare_fields', [])) +
+            list(column_mapping.get('display_fields', [])) +
+            list(column_mapping.get('ignored_fields', []))
+        )
+        for dup_name in dup_names:
+            dup_positions = sorted(
+                col['index'] for col in analysis_columns if col['name'] == dup_name
+            )
+            user_dup_names = [n for n in all_user_names
+                              if n.startswith(f'{dup_name} [')]
+            for i, pos in enumerate(dup_positions):
+                if i < len(user_dup_names):
+                    position_to_name[pos] = user_dup_names[i]
+
     new_cols = list(df.columns)
     for col in analysis_columns:
         if col['name'] not in dup_names:
             continue
-        auto_label = group_map.get(col['index'], str(col['index']))
-        bracket_name = f"{col['name']} [{auto_label}]"
         idx = col['index']
         if idx < len(new_cols):
-            new_cols[idx] = bracket_name
+            if idx in position_to_name:
+                new_cols[idx] = position_to_name[idx]
+            else:
+                auto_label = group_map.get(idx, str(idx))
+                new_cols[idx] = f"{col['name']} [{auto_label}]"
 
     df = df.copy()
     df.columns = new_cols
@@ -373,8 +396,9 @@ def process():
             []
         )
         if analysis_cols_a:
-            df_a = _rename_dup_columns(df_a, analysis_cols_a)
-            df_b = _rename_dup_columns(df_b, analysis_cols_a)  # same structure assumed
+            col_mapping = template_dict.get('column_mapping')
+            df_a = _rename_dup_columns(df_a, analysis_cols_a, col_mapping)
+            df_b = _rename_dup_columns(df_b, analysis_cols_a, col_mapping)  # same structure assumed
 
         result = execute_template(template, df_a, df_b)
     except Exception as e:

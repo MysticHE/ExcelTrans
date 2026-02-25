@@ -339,7 +339,21 @@ export default function Step2_SheetSelector({ wizard, aiConfig }) {
                 sheet={sheet}
                 maxRows={maxRowsA}
                 selected={state.selectedSheets.file_a === sheet.name}
-                onSelect={(name) => update({ selectedSheets: { ...state.selectedSheets, file_a: name } })}
+                onSelect={(name) => {
+                  const changed = name !== state.selectedSheets.file_a;
+                  update({
+                    selectedSheets: { ...state.selectedSheets, file_a: name },
+                    ...(changed ? {
+                      columnMapping: { unique_key: [], compare_fields: [], display_fields: [], ignored_fields: [], formula_fields: {} },
+                      rules: [],
+                      outputConfig: {
+                        ...state.outputConfig,
+                        included_columns: null,
+                        column_order: null,
+                      },
+                    } : {})
+                  });
+                }}
               />
             )) : (
               <EmptyState
@@ -349,6 +363,11 @@ export default function Step2_SheetSelector({ wizard, aiConfig }) {
               />
             )}
           </div>
+          {state.columnMapping?.unique_key?.length > 0 && (
+            <Alert variant="warning" className="mt-2 text-xs py-1.5 px-3">
+              Changing sheets will reset your column mapping and rules.
+            </Alert>
+          )}
         </div>
 
         {/* File B */}
